@@ -1,0 +1,9 @@
+# git stores LF and checks LF back out whatever core.autocrlf says on the machine —
+# this repo was written on Windows with autocrlf=true, so without this a fresh clone
+# comes back CRLF and every later diff argues about line endings instead of code
+* text=auto eol=lf
+
+# never line-ending-convert or attempt to diff these
+*.png binary
+*.pdn binary
+*.vsix binary
