@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chat Tags — view harness</title>
+<style>
+/* row height matches the built-in chat sessions list (ITEM_HEIGHT = 54) so the two
+   views sit side by side without looking like different products */
+
+:root {
+	--row-height: 54px;
+	--stripe-width: 3px;
+	/* resting rows sit high enough to read the colour at a glance; attention rows get
+	   the remaining headroom plus the left border, so the border means one thing only */
+	--wash-rest: 22%;
+	--wash-hover: 30%;
+	--wash-attention: 42%;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	color: var(--vscode-foreground);
+	background: transparent;
+	user-select: none;
+}
+
+button {
+	font-family: inherit;
+	color: inherit;
+	background: none;
+	border: none;
+	cursor: pointer;
+}
+
+.toolbar {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+	padding: 5px 8px;
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	background: var(--vscode-sideBar-background, transparent);
+	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.toolbar button {
+	font-size: 11px;
+	border-radius: 4px;
+	padding: 3px 7px;
+	opacity: 0.85;
+}
+
+.toolbar button:hover {
+	background: var(--vscode-list-hoverBackground);
+	opacity: 1;
+}
+
+.toolbar button.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+	opacity: 1;
+}
+
+.toolbar .spacer {
+	flex: 1;
+}
+
+.count {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.row {
+	position: relative;
+	height: var(--row-height);
+	padding: 8px 10px 8px 14px;
+	display: grid;
+	grid-template-rows: auto auto;
+	align-content: center;
+	gap: 2px;
+	cursor: pointer;
+	border-left: var(--stripe-width) solid transparent;
+	outline: none;
+}
+
+.row[data-category] {
+	background: color-mix(in srgb, var(--row-colour) var(--wash-rest), transparent);
+}
+
+.row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.row[data-category]:hover {
+	background: color-mix(in srgb, var(--row-colour) var(--wash-hover), var(--vscode-list-hoverBackground));
+}
+
+/* the one signal that means "this wants you": full-strength wash, the left border,
+   and a heavier title. nothing else in the view uses the border */
+.row[data-attention="true"] {
+	border-left-color: var(--row-colour, var(--vscode-focusBorder));
+}
+
+.row[data-attention="true"][data-category] {
+	background: color-mix(in srgb, var(--row-colour) var(--wash-attention), transparent);
+}
+
+.row[data-attention="true"] .title {
+	font-weight: 600;
+}
+
+.row.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.row:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--dot-colour, var(--vscode-descriptionForeground));
+}
+
+/* activity reads as intensity rather than hue, so category colour stays the signal
+   for "what is this" and brightness stays the signal for "is it moving" */
+.row[data-state="idle"] .dot { opacity: 0.7; }
+.row[data-state="recent"] .dot { opacity: 0.88; }
+.row[data-state="active"] .dot { opacity: 1; }
+.row[data-attention="true"] .dot {
+	opacity: 1;
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-colour, var(--vscode-focusBorder)) 30%, transparent);
+}
+
+.title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+}
+
+.subtitle-line {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding-left: 14px;
+	min-width: 0;
+}
+
+.subtitle {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* the subtitle text is no longer a click target — editing needs the pencil, so
+   clicking anywhere on the row reliably opens the session */
+.edit {
+	flex: 0 0 auto;
+	opacity: 0;
+	font-size: 11px;
+	line-height: 1;
+	padding: 1px 3px;
+	border-radius: 3px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row:hover .edit,
+.row:focus-within .edit {
+	opacity: 0.75;
+}
+
+.edit:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.subtitle.placeholder {
+	opacity: 0.65;
+	font-style: italic;
+}
+
+.row-input {
+	flex: 1;
+	min-width: 0;
+	font-family: inherit;
+	font-size: 11px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, transparent);
+	border: 1px solid var(--vscode-focusBorder);
+	border-radius: 3px;
+	padding: 1px 4px;
+	outline: none;
+}
+
+/* ── in-pane panels ───────────────────────────────────────── */
+
+.panel {
+	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+	background: var(--vscode-sideBar-background, transparent);
+	padding: 8px;
+}
+
+.panel h2 {
+	margin: 0 0 6px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--vscode-descriptionForeground);
+	font-weight: 600;
+}
+
+.cat-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 0;
+}
+
+.cat-row input[type="color"] {
+	flex: 0 0 auto;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--vscode-contrastBorder, transparent);
+	border-radius: 4px;
+	background: none;
+	cursor: pointer;
+}
+
+.cat-row input[type="text"] {
+	flex: 1;
+	min-width: 0;
+	font-family: inherit;
+	font-size: 12px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, transparent);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 3px;
+	padding: 3px 6px;
+	outline: none;
+}
+
+.cat-row input[type="text"]:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.cat-row .remove {
+	flex: 0 0 auto;
+	opacity: 0.6;
+	font-size: 13px;
+	padding: 0 4px;
+}
+
+.cat-row .remove:hover {
+	opacity: 1;
+	color: var(--vscode-errorForeground, inherit);
+}
+
+.panel .add {
+	font-size: 11px;
+	margin-top: 6px;
+	padding: 3px 7px;
+	border-radius: 4px;
+	border: 1px dashed var(--vscode-descriptionForeground);
+	opacity: 0.8;
+}
+
+.panel .add:hover {
+	opacity: 1;
+	background: var(--vscode-list-hoverBackground);
+}
+
+.panel .hint {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 6px;
+	line-height: 1.4;
+}
+
+.section {
+	margin-top: 12px;
+	padding-top: 8px;
+	border-top: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.opt-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 7px;
+	width: 100%;
+	text-align: left;
+	padding: 4px 5px;
+	border-radius: 4px;
+}
+
+.opt-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.opt-row.chosen .opt-label {
+	font-weight: 600;
+}
+
+.opt-row .radio {
+	flex: 0 0 auto;
+	font-size: 10px;
+	line-height: 15px;
+	opacity: 0.8;
+}
+
+.opt-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.opt-label {
+	font-size: 12px;
+}
+
+.opt-hint {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.35;
+}
+
+.field {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 5px;
+}
+
+.field-label {
+	flex: 1;
+	font-size: 12px;
+	min-width: 0;
+}
+
+/* the slider needs the room, so its label gives up the flex share */
+.field-label.narrow {
+	flex: 0 0 auto;
+}
+
+.field-suffix {
+	flex: 0 0 auto;
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	min-width: 26px;
+}
+
+.field input[type="number"] {
+	flex: 0 0 auto;
+	width: 52px;
+	font-family: inherit;
+	font-size: 12px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, transparent);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 3px;
+	padding: 2px 5px;
+	outline: none;
+}
+
+.field input[type="number"]:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.field input[type="range"] {
+	flex: 1 1 auto;
+	min-width: 0;
+	accent-color: var(--vscode-focusBorder);
+}
+
+/* category assignment popover, anchored under the row's ⋯ button */
+.popover {
+	position: absolute;
+	z-index: 10;
+	min-width: 150px;
+	padding: 4px;
+	border-radius: 5px;
+	background: var(--vscode-menu-background, var(--vscode-sideBar-background));
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	border: 1px solid var(--vscode-menu-border, var(--vscode-contrastBorder, transparent));
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.36);
+}
+
+.popover button {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+	text-align: left;
+	font-size: 12px;
+	padding: 4px 6px;
+	border-radius: 3px;
+}
+
+.popover button:hover {
+	background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-menu-selectionForeground, inherit);
+}
+
+.popover .swatch {
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--swatch, transparent);
+	border: 1px solid var(--vscode-descriptionForeground);
+}
+
+.popover .sep {
+	height: 1px;
+	margin: 4px 2px;
+	background: var(--vscode-menu-separatorBackground, var(--vscode-sideBarSectionHeader-border, transparent));
+}
+
+.empty {
+	padding: 16px 12px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.5;
+}
+
+.subtitle.generating {
+	opacity: 0.7;
+	font-style: italic;
+	animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%, 100% { opacity: 0.45; }
+	50% { opacity: 0.85; }
+}
+
+.field.toggle {
+	gap: 6px;
+}
+
+.field.toggle input[type="checkbox"] {
+	flex: 0 0 auto;
+	margin: 0;
+	accent-color: var(--vscode-focusBorder);
+}
+
+.field.toggle label {
+	font-size: 11px;
+	color: var(--vscode-foreground);
+	cursor: pointer;
+}
+
+.toolbar button.icon {
+	flex: 0 0 auto;
+	width: 22px;
+	padding: 3px 0;
+	font-size: 13px;
+	line-height: 1;
+	text-align: center;
+}
+
+/* the settings panel leads with a section, which would otherwise draw a rule under the
+   toolbar's own border */
+.panel > .section:first-child {
+	margin-top: 0;
+	padding-top: 0;
+	border-top: none;
+}
+
+.panel .sub-label {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin: 2px 0 4px;
+	opacity: 0.85;
+}
+
+/* a renamed session gets a hairline under the title — enough to notice, not enough to
+   compete with the attention border */
+.title[data-overridden="true"] {
+	text-decoration: underline;
+	text-decoration-style: dotted;
+	text-decoration-color: var(--vscode-descriptionForeground);
+	text-underline-offset: 3px;
+}
+
+/* ── row buttons ────────────────────────────────────────── */
+
+/* the controls collapse to nothing when the row isn't hovered. they used to hold their
+   width while invisible, which cost the title about 60px of every row for no reason */
+.row-actions {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	width: 0;
+	overflow: hidden;
+}
+
+.row:hover .row-actions,
+.row:focus-within .row-actions,
+.row-actions.has-armed {
+	width: auto;
+	overflow: visible;
+}
+
+.gen {
+	flex: 0 0 auto;
+	opacity: 0;
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 3px;
+	border-radius: 3px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row:hover .gen,
+.row:focus-within .gen {
+	opacity: 0.75;
+}
+
+.gen:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+/* the field was written by hand — say so before it gets overwritten */
+.row:hover .gen.guarded,
+.row:focus-within .gen.guarded {
+	opacity: 0.35;
+}
+
+.gen.guarded:hover {
+	opacity: 0.6;
+}
+
+/* armed stays visible whether or not the row is hovered — it is a live decision */
+.row .gen.armed,
+.row:hover .gen.armed,
+.gen.armed:hover {
+	opacity: 1;
+	color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+	background: var(--vscode-inputValidation-warningBackground, var(--vscode-list-hoverBackground));
+	box-shadow: inset 0 0 0 1px var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder));
+}
+
+/* the title row's controls sit to the right of the title, same as the subtitle's */
+.line .edit,
+.line .gen {
+	margin-left: 0;
+}
+
+.edit svg,
+.gen svg,
+.actions svg {
+	display: block;
+}
+
+/* ── toolbar ────────────────────────────────────────────── */
+
+.toolbar button.icon svg {
+	display: block;
+	margin: 0 auto;
+}
+
+.toolbar .logo {
+	display: block;
+	width: 15px;
+	height: 15px;
+	margin: 0 auto;
+	/* the logo is already a finished thing — no theme tinting, just size it */
+	object-fit: contain;
+}
+
+/* an open panel is closed by the same button that opened it, so the button has to
+   read as pressed rather than merely hovered */
+.toolbar button.active,
+.toolbar button.icon.active {
+	background: var(--vscode-inputOption-activeBackground, var(--vscode-list-activeSelectionBackground));
+	color: var(--vscode-inputOption-activeForeground, var(--vscode-list-activeSelectionForeground));
+	box-shadow: inset 0 0 0 1px var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+	opacity: 1;
+}
+
+/* ── model picker ───────────────────────────────────────── */
+
+.field select {
+	flex: 1;
+	min-width: 0;
+	font-family: inherit;
+	font-size: 11px;
+	padding: 2px 4px;
+	border-radius: 3px;
+	color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+	background: var(--vscode-dropdown-background, var(--vscode-input-background));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+}
+
+.field select:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.field.empty select {
+	opacity: 0.6;
+}
+
+/* the title line runs at 13px, so its editor has to as well or the row jumps */
+.title-input {
+	font-size: 13px;
+}
+
+/* the title's own controls live in the same collapsing group, so the ⋯ no longer holds
+   a permanent column on the right either */
+.line .row-actions,
+.subtitle-line .row-actions {
+	margin-left: 2px;
+}
+
+.actions {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 3px;
+	border-radius: 3px;
+	opacity: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row:hover .actions,
+.row:focus-within .actions,
+.row-actions.has-armed .actions {
+	opacity: 0.75;
+}
+
+.actions:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+/* ── grouping ───────────────────────────────────────────── */
+
+/* a group heading is furniture, so it sits below the toolbar but above the rows it
+   introduces and never takes the row treatment */
+.group {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 10px 3px 14px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+	cursor: default;
+}
+
+.group .swatch {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--swatch, transparent);
+	border: 1px solid var(--vscode-descriptionForeground);
+}
+
+.group-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.group-count {
+	flex: 0 0 auto;
+	font-weight: 400;
+	opacity: 0.7;
+}
+
+/* ── archived ───────────────────────────────────────────── */
+
+/* archived rows are still readable, just clearly set aside. the category wash goes with
+   them — colour is a working signal and these aren't being worked on */
+.row.archived {
+	opacity: 0.55;
+	background: none;
+}
+
+.row.archived:hover {
+	opacity: 0.85;
+	background: var(--vscode-list-hoverBackground);
+}
+
+.row.archived .dot {
+	opacity: 0.4;
+}
+
+/* the count of what's hidden, and the way back to it */
+.footer {
+	display: block;
+	width: 100%;
+	text-align: left;
+	padding: 8px 10px 10px 14px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.footer:hover {
+	color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+	text-decoration: underline;
+}
+
+/* ── menus ──────────────────────────────────────────────── */
+
+.popover .menu-label {
+	padding: 4px 6px 2px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* fixed width so labels don't shift sideways as the tick comes and goes */
+.popover .tick {
+	flex: 0 0 auto;
+	width: 10px;
+	font-size: 11px;
+	text-align: center;
+	color: var(--vscode-foreground);
+}
+
+/* an entry that isn't a category has nothing to swatch, and a hollow circle beside
+   'Archive' reads as an unset radio button */
+.popover button.plain .swatch,
+.popover button.danger .swatch {
+	border-color: transparent;
+}
+
+.popover button.danger {
+	color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+.popover button.danger:hover {
+	background: var(--vscode-inputValidation-errorBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+
+body { margin: 0; font-family: -apple-system, "Segoe UI", sans-serif; background: #0d0d0d; }
+.panes { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
+.pane { width: 340px; border-radius: 6px; overflow: hidden; }
+.pane.dark { --vscode-foreground:#cccccc;--vscode-descriptionForeground:#9d9d9d;--vscode-sideBar-background:#181818;--vscode-sideBarSectionHeader-border:#2b2b2b;--vscode-list-hoverBackground:#2a2d2e;--vscode-list-activeSelectionBackground:#04395e;--vscode-list-activeSelectionForeground:#ffffff;--vscode-button-secondaryBackground:#313131;--vscode-button-secondaryForeground:#cccccc;--vscode-button-secondaryHoverBackground:#3c3c3c;--vscode-focusBorder:#0078d4; background: #181818; color: #cccccc; }
+.pane.light { --vscode-foreground:#3b3b3b;--vscode-descriptionForeground:#767676;--vscode-sideBar-background:#f8f8f8;--vscode-sideBarSectionHeader-border:#e5e5e5;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#0060c0;--vscode-list-activeSelectionForeground:#ffffff;--vscode-button-secondaryBackground:#e5e5e5;--vscode-button-secondaryForeground:#3b3b3b;--vscode-button-secondaryHoverBackground:#dcdcdc;--vscode-focusBorder:#005fb8; background: #f8f8f8; color: #3b3b3b; }
+.pane { --vscode-font-family: -apple-system, "Segoe UI", sans-serif; --vscode-font-size: 13px; }
+.harness-label { font-size: 11px; opacity: 0.5; padding: 6px 10px 2px; }
+</style>
+</head>
+<body>
+<div class="panes">
+	<div class="pane dark">
+		<div class="harness-label">dark · 340px</div>
+		<div class="host" id="host-dark"></div>
+	</div>
+	<div class="pane light">
+		<div class="harness-label">light · 340px</div>
+		<div class="host" id="host-light"></div>
+	</div></div>
+
+<script>
+const NOW = 1787000000000;
+const CATEGORIES = [{"id":"c1","name":"Homelab","colour":"#3794ff"},{"id":"c2","name":"Stonks","colour":"#3fb950"},{"id":"c3","name":"Bug hunt","colour":"#e5534b"},{"id":"c4","name":"Research","colour":"#a371f7"}];
+const MODELS = [{"id":"gpt-4o-mini","name":"GPT-4o mini","family":"gpt-4o-mini","vendor":"copilot"},{"id":"stealth/ox-alpha","name":"Ox Alpha","family":"ox","vendor":"openrouter"},{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5","family":"haiku","vendor":"openrouter"}];
+const SESSIONS = [{"sessionId":"s1","title":"Start from SESSION_PROMPT_PHASE_19_WAVES.md","subtitle":"Waiting for API key","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":1,"activity":"active","generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999988000,"createdAt":1786999136000},{"sessionId":"s2","title":"Forward-accumulating dataset collectors","subtitle":"Blocked on schema migration","titleOverridden":true,"titleSource":"llm","categoryId":"c2","requestCount":15,"activity":"recent","generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999910000,"createdAt":1786136000000},{"sessionId":"s3","title":"Upgrade OpenVPN access server","titleOverridden":false,"categoryId":"c1","requestCount":1,"activity":"recent","generating":true,"archived":false,"needsAttention":false,"lastActivityAt":1786999604000,"createdAt":1786999481600},{"sessionId":"s4","title":"Assess public datasets for stonks db","subtitle":"Reviewing 42 candidate sources","titleOverridden":false,"categoryId":"c4","requestCount":6,"activity":"idle","generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786925360000,"createdAt":1786919648000},{"sessionId":"s5","title":"Backslash parsing issue in command","subtitle":"Fixed — needs regression test","subtitleSource":"manual","titleOverridden":true,"titleSource":"manual","categoryId":"c3","requestCount":1,"activity":"idle","generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786994420000,"createdAt":1786993952000},{"sessionId":"s6","title":"PATH config review for pipreqs","titleOverridden":false,"requestCount":2,"activity":"idle","generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786680620000,"createdAt":1786680320000},{"sessionId":"s7","title":"A deliberately very long session title that should ellipsize rather than wrap","titleOverridden":false,"categoryId":"c1","requestCount":9,"activity":"idle","generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786934480000,"createdAt":1786934336000},{"sessionId":"s8","title":"Macquarie CSV exporter cookie jar","subtitle":"Abandoned — auth token is not a cookie","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":31,"activity":"idle","generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786500020000,"createdAt":1786481600000},{"sessionId":"s9","title":"Old irrigation caddy notes","titleOverridden":false,"requestCount":4,"activity":"idle","generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786300040000,"createdAt":1786291520000}];
+
+// view.js binds to #root and window messages, so each pane gets its own run with
+// those two things scoped to it
+function mount(hostId, listSettings) {
+	const host = document.getElementById(hostId);
+	const root = document.createElement('div');
+	root.id = 'root';
+	host.appendChild(root);
+
+	const realGet = document.getElementById.bind(document);
+	document.getElementById = id => (id === 'root' ? root : realGet(id));
+
+	const listeners = [];
+	const realAdd = window.addEventListener.bind(window);
+	window.addEventListener = (type, fn, opts) => {
+		if (type === 'message') { listeners.push(fn); } else { realAdd(type, fn, opts); }
+	};
+	window.acquireVsCodeApi = () => ({ postMessage: m => console.log(hostId, JSON.stringify(m)) });
+
+	// @ts-check
+(function () {
+	const vscode = acquireVsCodeApi();
+	const root = document.getElementById('root');
+
+	const DEFAULT_SETTINGS = {
+		openTarget: 'activeGroup', dedicatedColumnRatio: 0.4, activeSeconds: 45, recentMinutes: 10,
+		autoSubtitle: false, subtitleIdleSeconds: 120, subtitleMode: 'status', subtitleModel: '',
+		sortBy: 'activity', groupBy: 'none', showArchived: false
+	};
+	let state = { sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0 };
+	let selectedId = null;
+	// null | 'categories' | 'settings' — one at a time, they are separate things
+	let openPanel = null;
+	let editingSubtitleFor = null;
+
+	// inline svg rather than text glyphs — a glyph renders at whatever weight the user's
+	// font decides, and ⚙ in particular lands as an emoji on some systems
+	const SVG_NS = 'http://www.w3.org/2000/svg';
+	const ICON_PATHS = {
+		gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z',
+		refresh: 'M17.65 6.35A7.96 7.96 0 0 0 12 4c-4.42 0-7.99 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+		clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z',
+		notes: 'M14 17H4v2h10v-2zM20 9H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z',
+		pencil: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+		dots: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+		sort: 'M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z',
+		archive: 'M20.54 5.23l-1.39-1.68A1.45 1.45 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23A1.98 1.98 0 0 0 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z',
+		unarchive: 'M20.55 5.22l-1.39-1.68A1.51 1.51 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z',
+		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z'
+	};
+
+	function icon(name, size) {
+		const svg = document.createElementNS(SVG_NS, 'svg');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('width', String(size || 13));
+		svg.setAttribute('height', String(size || 13));
+		svg.setAttribute('aria-hidden', 'true');
+		svg.setAttribute('focusable', 'false');
+		const path = document.createElementNS(SVG_NS, 'path');
+		path.setAttribute('d', ICON_PATHS[name]);
+		path.setAttribute('fill', 'currentColor');
+		svg.appendChild(path);
+		return svg;
+	}
+
+	function relativeTime(timestamp, now) {
+		const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
+		if (seconds < 60) { return seconds + 's ago'; }
+		const minutes = Math.round(seconds / 60);
+		if (minutes < 60) { return minutes + 'm ago'; }
+		const hours = Math.round(minutes / 60);
+		if (hours < 24) { return hours + 'h ago'; }
+		return Math.round(hours / 24) + 'd ago';
+	}
+
+	function el(tag, className, text) {
+		const node = document.createElement(tag);
+		if (className) { node.className = className; }
+		// titles come from session files on disk — always set as text, never as html
+		if (text !== undefined) { node.textContent = text; }
+		return node;
+	}
+
+	function send(message) {
+		vscode.postMessage(message);
+	}
+
+	function togglePanel(panel) {
+		openPanel = openPanel === panel ? null : panel;
+		render();
+	}
+
+	function closePopovers() {
+		document.querySelectorAll('.popover').forEach(node => node.remove());
+	}
+
+	// ── popovers ──────────────────────────────────────────────
+
+	// anchored under whichever button opened it, clamped to the pane so a menu opened on
+	// the right-hand edge of a narrow sidebar still lands fully on screen
+	function placePopover(popover, anchor) {
+		document.body.appendChild(popover);
+		const box = anchor.getBoundingClientRect();
+		const width = popover.offsetWidth;
+		popover.style.top = (box.bottom + window.scrollY + 2) + 'px';
+		popover.style.left = Math.max(4, Math.min(box.left, window.innerWidth - width - 6)) + 'px';
+	}
+
+	function addAction(popover, label, run, className) {
+		const button = el('button', className);
+		button.appendChild(el('span', 'swatch'));
+		button.appendChild(el('span', null, label));
+		button.addEventListener('click', event => {
+			event.stopPropagation();
+			closePopovers();
+			run();
+		});
+		popover.appendChild(button);
+		return button;
+	}
+
+	// a checkable menu entry — the tick keeps its column whether or not it is set, so the
+	// labels don't shuffle sideways as you toggle things
+	function addChoice(popover, label, checked, run) {
+		const button = el('button');
+		button.appendChild(el('span', 'tick', checked ? '✓' : ''));
+		button.appendChild(el('span', null, label));
+		button.setAttribute('aria-checked', String(checked));
+		button.setAttribute('role', 'menuitemcheckbox');
+		button.addEventListener('click', event => {
+			event.stopPropagation();
+			closePopovers();
+			run();
+		});
+		popover.appendChild(button);
+		return button;
+	}
+
+	// the row's ⋯ menu: categories, then the two things that take a session out of the list
+	function openPopover(anchor, session) {
+		closePopovers();
+		const popover = el('div', 'popover');
+
+		for (const category of state.categories) {
+			const button = el('button');
+			const swatch = el('span', 'swatch');
+			swatch.style.setProperty('--swatch', category.colour);
+			button.appendChild(swatch);
+			button.appendChild(el('span', null, category.name + (category.id === session.categoryId ? '  ✓' : '')));
+			button.addEventListener('click', event => {
+				event.stopPropagation();
+				closePopovers();
+				send({ type: 'setCategory', sessionId: session.sessionId, categoryId: category.id });
+			});
+			popover.appendChild(button);
+		}
+
+		if (state.categories.length) {
+			popover.appendChild(el('div', 'sep'));
+		}
+
+		addAction(popover, 'No category',
+			() => send({ type: 'setCategory', sessionId: session.sessionId, categoryId: null }));
+		addAction(popover, 'Edit categories…', () => { openPanel = 'categories'; render(); }, 'plain');
+
+		popover.appendChild(el('div', 'sep'));
+
+		addAction(popover, session.archived ? 'Restore from archive' : 'Archive',
+			() => send({ type: 'setArchived', sessionId: session.sessionId, archived: !session.archived }), 'plain');
+
+		// vs code runs its own confirmation, which is why this reads as a dialog opener
+		addAction(popover, 'Delete…',
+			() => send({ type: 'deleteSession', sessionId: session.sessionId }), 'danger');
+
+		placePopover(popover, anchor);
+	}
+
+	// ── list menu ─────────────────────────────────────────────
+
+	// order and grouping are flipped often enough that burying them in the settings panel
+	// would be wrong, so they get their own menu rather than a row of radio buttons
+	function openListMenu(anchor) {
+		closePopovers();
+		const settings = state.settings;
+		const popover = el('div', 'popover');
+
+		popover.appendChild(el('div', 'menu-label', 'Sort by'));
+		addChoice(popover, 'Last message', settings.sortBy !== 'created',
+			() => send({ type: 'setSetting', key: 'sortBy', value: 'activity' }));
+		addChoice(popover, 'Created', settings.sortBy === 'created',
+			() => send({ type: 'setSetting', key: 'sortBy', value: 'created' }));
+
+		popover.appendChild(el('div', 'sep'));
+		addChoice(popover, 'Group by category', settings.groupBy === 'category',
+			() => send({
+				type: 'setSetting',
+				key: 'groupBy',
+				value: settings.groupBy === 'category' ? 'none' : 'category'
+			}));
+
+		popover.appendChild(el('div', 'sep'));
+		addChoice(popover, 'Show archived', settings.showArchived,
+			() => send({ type: 'setSetting', key: 'showArchived', value: !settings.showArchived }));
+
+		placePopover(popover, anchor);
+	}
+
+	// ── categories panel ──────────────────────────────────────
+
+	function buildCategoriesPanel() {
+		const panel = el('div', 'panel');
+		panel.appendChild(el('h2', null, 'Categories'));
+
+		for (const category of state.categories) {
+			const row = el('div', 'cat-row');
+
+			const colour = document.createElement('input');
+			colour.type = 'color';
+			colour.value = category.colour;
+			colour.title = 'Colour';
+			// 'change' not 'input' — 'input' fires continuously while dragging the picker
+			colour.addEventListener('change', () => {
+				send({ type: 'updateCategory', id: category.id, colour: colour.value });
+			});
+
+			const name = document.createElement('input');
+			name.type = 'text';
+			name.value = category.name;
+			name.spellcheck = false;
+			const commitName = () => {
+				const next = name.value.trim();
+				if (next && next !== category.name) {
+					send({ type: 'updateCategory', id: category.id, name: next });
+				}
+			};
+			name.addEventListener('blur', commitName);
+			name.addEventListener('keydown', event => {
+				if (event.key === 'Enter') { name.blur(); }
+				if (event.key === 'Escape') { name.value = category.name; name.blur(); }
+			});
+
+			const remove = el('button', 'remove', '✕');
+			remove.title = 'Delete category';
+			remove.addEventListener('click', () => send({ type: 'deleteCategory', id: category.id }));
+
+			row.appendChild(colour);
+			row.appendChild(name);
+			row.appendChild(remove);
+			panel.appendChild(row);
+		}
+
+		const add = el('button', 'add', '+ Add category');
+		add.addEventListener('click', () => send({ type: 'createCategory' }));
+		panel.appendChild(add);
+
+		if (!state.categories.length) {
+			panel.appendChild(el('div', 'hint', 'Add a category, then use the ⋯ button on any session to assign it.'));
+		}
+		return panel;
+	}
+
+	// ── settings panel ────────────────────────────────────────
+
+	function buildSettingsPanel() {
+		const panel = el('div', 'panel');
+		panel.appendChild(buildLayoutSection());
+		return panel;
+	}
+
+	const OPEN_TARGETS = [
+		{ id: 'activeGroup', label: 'Active editor group', hint: 'Opens wherever you already are.' },
+		{ id: 'beside', label: 'Split to the side', hint: 'Splits right the first time, then reuses it.' },
+		{ id: 'dedicatedRight', label: 'Dedicated right column', hint: 'Keeps a full-height column on the right for every chat.' }
+	];
+
+	function numberField(labelText, suffix, value, min, max, key) {
+		const field = el('div', 'field');
+		field.appendChild(el('span', 'field-label', labelText));
+		const input = document.createElement('input');
+		input.type = 'number';
+		input.min = String(min);
+		input.max = String(max);
+		input.value = String(value);
+		const commit = () => {
+			const next = Math.min(max, Math.max(min, Number(input.value) || value));
+			input.value = String(next);
+			if (next !== value) { send({ type: 'setSetting', key: key, value: next }); }
+		};
+		input.addEventListener('blur', commit);
+		input.addEventListener('keydown', event => {
+			event.stopPropagation();
+			if (event.key === 'Enter') { input.blur(); }
+		});
+		field.appendChild(input);
+		field.appendChild(el('span', 'field-suffix', suffix));
+		return field;
+	}
+
+	function toggleField(labelText, value, key, hint) {
+		const field = el('div', 'field toggle');
+		const box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = Boolean(value);
+		box.id = 'toggle-' + key;
+		box.addEventListener('change', () => send({ type: 'setSetting', key: key, value: box.checked }));
+		const label = document.createElement('label');
+		label.htmlFor = box.id;
+		label.textContent = labelText;
+		field.appendChild(box);
+		field.appendChild(label);
+		const wrap = el('div', 'toggle-wrap');
+		wrap.appendChild(field);
+		if (hint) { wrap.appendChild(el('div', 'hint', hint)); }
+		return wrap;
+	}
+
+	function selectField(labelText, value, options, key) {
+		const field = el('div', 'field');
+		field.appendChild(el('span', 'field-label', labelText));
+		const select = document.createElement('select');
+		for (const option of options) {
+			const node = document.createElement('option');
+			node.value = option.value;
+			node.textContent = option.label;
+			if (option.value === value) { node.selected = true; }
+			select.appendChild(node);
+		}
+		// a model the setting names but the window no longer offers, so the picker still
+		// shows what is actually configured instead of silently reading as automatic
+		if (value && !options.some(option => option.value === value)) {
+			const node = document.createElement('option');
+			node.value = value;
+			node.textContent = value + ' (not available)';
+			node.selected = true;
+			select.appendChild(node);
+		}
+		select.addEventListener('change', () => send({ type: 'setSetting', key: key, value: select.value }));
+		field.appendChild(select);
+		return field;
+	}
+
+	function buildModelField() {
+		const models = state.models || [];
+		const options = [{ value: '', label: models.length ? 'Automatic (cheapest)' : 'Automatic' }];
+		for (const model of models) {
+			const vendor = model.vendor ? model.vendor + ' · ' : '';
+			options.push({ value: model.id, label: vendor + (model.name || model.family || model.id) });
+		}
+		const field = selectField('Model', state.settings.subtitleModel || '', options, 'subtitleModel');
+		if (!models.length) {
+			field.classList.add('empty');
+		}
+		return field;
+	}
+
+	function buildSubtitleSection() {
+		const settings = state.settings;
+		const section = el('div', 'section');
+		section.appendChild(el('h2', null, 'Subtitles'));
+		section.appendChild(el('div', 'sub-label', 'Default mode'));
+		radioRows(section, SUBTITLE_MODES, settings.subtitleMode,
+			id => send({ type: 'setSetting', key: 'subtitleMode', value: id }));
+		section.appendChild(toggleField(
+			'Generate when a session goes quiet',
+			settings.autoSubtitle,
+			'autoSubtitle',
+			'Every generation is a request against your chat provider. Sessions you have written a subtitle for yourself are left alone.'
+		));
+		if (settings.autoSubtitle) {
+			section.appendChild(numberField('Quiet for', 'sec', settings.subtitleIdleSeconds, 10, 3600, 'subtitleIdleSeconds'));
+		}
+		section.appendChild(buildModelField());
+		if (!(state.models || []).length) {
+			section.appendChild(el('div', 'hint',
+				'No language model is available in this window. Sign in to a chat provider, or add one under Chat: Manage Language Models.'));
+		}
+		section.appendChild(el('div', 'hint',
+			'Every row has its own buttons: a clock for recent status, lines for a task summary, and a refresh on the title.'));
+		return section;
+	}
+
+	const SUBTITLE_MODES = [
+		{ id: 'status', label: 'Recent status', hint: 'Where the session is now, from its most recent messages.' },
+		{ id: 'task', label: 'Task summary', hint: 'What it was asked to do, from its opening messages.' }
+	];
+
+	function radioRows(section, options, current, onPick) {
+		for (const option of options) {
+			const chosen = current === option.id;
+			const row = el('button', chosen ? 'opt-row chosen' : 'opt-row');
+			row.appendChild(el('span', 'radio', chosen ? '●' : '○'));
+			const text = el('span', 'opt-text');
+			text.appendChild(el('span', 'opt-label', option.label));
+			text.appendChild(el('span', 'opt-hint', option.hint));
+			row.appendChild(text);
+			row.addEventListener('click', () => onPick(option.id));
+			section.appendChild(row);
+		}
+	}
+
+	function buildLayoutSection() {
+		const settings = state.settings;
+		const section = el('div', 'section');
+		section.appendChild(el('h2', null, 'When a session is clicked'));
+		radioRows(section, OPEN_TARGETS, settings.openTarget, id => send({ type: 'setOpenTarget', target: id }));
+
+		// width only matters for the dedicated column, so it only appears with it
+		if (settings.openTarget === 'dedicatedRight') {
+			const width = el('div', 'field');
+			width.appendChild(el('span', 'field-label narrow', 'Width'));
+			const slider = document.createElement('input');
+			slider.type = 'range';
+			slider.min = '20';
+			slider.max = '80';
+			slider.step = '5';
+			slider.value = String(Math.round(settings.dedicatedColumnRatio * 100));
+			const readout = el('span', 'field-suffix', slider.value + '%');
+			slider.addEventListener('input', () => { readout.textContent = slider.value + '%'; });
+			// 'change' not 'input' — dragging would otherwise write on every pixel
+			slider.addEventListener('change', () => {
+				send({ type: 'setSetting', key: 'dedicatedColumnRatio', value: Number(slider.value) / 100 });
+			});
+			width.appendChild(slider);
+			width.appendChild(readout);
+			section.appendChild(width);
+			section.appendChild(el('div', 'hint', 'Applied when the column is first created. Resize it yourself afterwards and Chat Tags leaves it alone.'));
+		}
+
+		const activity = el('div', 'section');
+		activity.appendChild(el('h2', null, 'Activity'));
+		activity.appendChild(numberField('Bright while active for', 'sec', settings.activeSeconds, 5, 600, 'activeSeconds'));
+		activity.appendChild(numberField('Counts as recent for', 'min', settings.recentMinutes, 1, 1440, 'recentMinutes'));
+		section.appendChild(activity);
+		section.appendChild(buildSubtitleSection());
+
+		return section;
+	}
+
+	// ── rows ──────────────────────────────────────────────────
+
+	// one editor for both lines. writing either one by hand marks it 'manual', which is
+	// what makes the generate buttons ask before overwriting it
+	const FIELDS = {
+		title: {
+			selector: '.title, .line .row-input',
+			message: 'setTitle',
+			// clearing it is the reset — setTitle drops the override on an empty string
+			placeholder: session => session.titleOverridden
+				? 'Clear to restore the original title'
+				: 'Name this session',
+			current: session => session.title || ''
+		},
+		subtitle: {
+			selector: '.subtitle, .subtitle-line .row-input',
+			message: 'setSubtitle',
+			placeholder: () => 'e.g. Waiting for API key',
+			current: session => session.subtitle || ''
+		}
+	};
+
+	function startEdit(row, session, field) {
+		const spec = FIELDS[field];
+		editingSubtitleFor = session.sessionId;
+		const existing = row.querySelector(spec.selector);
+		if (!existing) { return; }
+		// the buttons beside it would otherwise sit on top of a full-width input
+		row.querySelectorAll('.row-actions').forEach(node => { node.style.display = 'none'; });
+
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.className = 'row-input ' + field + '-input';
+		input.value = spec.current(session);
+		input.placeholder = spec.placeholder(session);
+		input.spellcheck = false;
+
+		const commit = save => {
+			if (editingSubtitleFor !== session.sessionId) { return; }
+			editingSubtitleFor = null;
+			if (save) {
+				send({ type: spec.message, sessionId: session.sessionId, text: input.value });
+			} else {
+				render();
+			}
+		};
+		input.addEventListener('keydown', event => {
+			event.stopPropagation();
+			if (event.key === 'Enter') { commit(true); }
+			if (event.key === 'Escape') { commit(false); }
+		});
+		input.addEventListener('blur', () => commit(true));
+		input.addEventListener('click', event => event.stopPropagation());
+
+		existing.replaceWith(input);
+		input.focus();
+		input.select();
+	}
+
+	// a generate button over something the user wrote themselves arms on the first click
+	// and fires on the second. armed state lives here rather than in the session so a
+	// repaint from the file watcher doesn't silently disarm it mid-decision
+	let armed = null;
+	let armedTimer = null;
+
+	function disarm() {
+		if (armedTimer) { clearTimeout(armedTimer); armedTimer = null; }
+		if (armed) { armed = null; render(); }
+	}
+
+	function generateButton(session, mode, options) {
+		const key = session.sessionId + ':' + mode;
+		const isArmed = armed === key;
+		const guarded = options.guarded;
+		const classes = ['gen'];
+		if (guarded) { classes.push('guarded'); }
+		if (isArmed) { classes.push('armed'); }
+
+		const button = el('button', classes.join(' '));
+		button.appendChild(icon(options.iconName));
+		button.title = isArmed
+			? 'You have customised this ' + options.noun + ' already, confirm regenerate?'
+			: options.label;
+		button.setAttribute('aria-label', options.label + ' for ' + session.title);
+
+		button.addEventListener('click', event => {
+			event.stopPropagation();
+			if (guarded && !isArmed) {
+				armed = key;
+				if (armedTimer) { clearTimeout(armedTimer); }
+				// long enough to read the tooltip, short enough that it doesn't stay hot
+				armedTimer = setTimeout(disarm, 6000);
+				render();
+				return;
+			}
+			disarm();
+			send({ type: 'generateSubtitle', sessionId: session.sessionId, mode: mode });
+		});
+		return button;
+	}
+
+	function buildRow(session, now) {
+		const category = state.categories.find(c => c.id === session.categoryId);
+		const row = el('li', 'row');
+		row.tabIndex = 0;
+		row.dataset.sessionId = session.sessionId;
+		row.dataset.state = session.activity;
+		row.dataset.attention = String(Boolean(session.needsAttention));
+		if (session.archived) { row.classList.add('archived'); }
+		row.setAttribute('role', 'option');
+		row.setAttribute('aria-selected', String(session.sessionId === selectedId));
+
+		if (category) {
+			row.dataset.category = category.id;
+			row.style.setProperty('--row-colour', category.colour);
+			row.style.setProperty('--dot-colour', category.colour);
+		}
+		if (session.sessionId === selectedId) {
+			row.classList.add('selected');
+		}
+
+		// ── title row ─────────────────────────────────────────
+		const top = el('div', 'line');
+		top.appendChild(el('span', 'dot'));
+		const title = el('span', 'title', session.title);
+		if (session.needsAttention) {
+			title.title = 'New activity since you last opened this';
+		}
+		if (session.titleOverridden) {
+			// the native list still shows the session's own title — this one is only ours
+			title.dataset.overridden = 'true';
+			title.title = session.titleSource === 'manual'
+				? 'Your title. Double-click to edit.'
+				: 'Generated title. Double-click to edit.';
+		}
+		title.addEventListener('dblclick', event => {
+			event.stopPropagation();
+			startEdit(row, session, 'title');
+		});
+		top.appendChild(title);
+
+		const titleEdit = el('button', 'edit');
+		titleEdit.appendChild(icon('pencil'));
+		titleEdit.title = 'Edit title';
+		titleEdit.setAttribute('aria-label', 'Edit title for ' + session.title);
+		titleEdit.addEventListener('click', event => {
+			event.stopPropagation();
+			startEdit(row, session, 'title');
+		});
+		const titleActions = el('span', 'row-actions');
+		// an archived row is being put away, not worked on — restoring it is the only
+		// thing worth a button, and generating over it would be a billable request on
+		// something the user has already dismissed
+		if (session.archived) {
+			const restore = el('button', 'edit');
+			restore.appendChild(icon('unarchive'));
+			restore.title = 'Restore from archive';
+			restore.setAttribute('aria-label', 'Restore ' + session.title + ' from archive');
+			restore.addEventListener('click', event => {
+				event.stopPropagation();
+				send({ type: 'setArchived', sessionId: session.sessionId, archived: false });
+			});
+			titleActions.appendChild(restore);
+		} else {
+			titleActions.appendChild(titleEdit);
+			titleActions.appendChild(generateButton(session, 'title', {
+				iconName: 'refresh',
+				label: 'Regenerate title',
+				noun: 'title',
+				guarded: session.titleSource === 'manual'
+			}));
+		}
+
+		const menuButton = el('button', 'actions');
+		menuButton.appendChild(icon('dots'));
+		menuButton.title = 'Category';
+		menuButton.setAttribute('aria-label', 'Category for ' + session.title);
+		menuButton.addEventListener('click', event => {
+			event.stopPropagation();
+			openPopover(menuButton, session);
+		});
+		titleActions.appendChild(menuButton);
+		if (armed === session.sessionId + ':title') {
+			titleActions.classList.add('has-armed');
+		}
+		top.appendChild(titleActions);
+
+		// ── subtitle row ──────────────────────────────────────
+		const hasSubtitle = Boolean(session.subtitle);
+		const subtitleText = session.generating
+			? 'Generating…'
+			: hasSubtitle
+				? session.subtitle
+				: session.requestCount + (session.requestCount === 1 ? ' request' : ' requests')
+					+ ' · ' + relativeTime(session.lastActivityAt, now);
+
+		const subtitleLine = el('div', 'subtitle-line');
+		const subtitle = el('span',
+			session.generating ? 'subtitle generating' : hasSubtitle ? 'subtitle' : 'subtitle placeholder',
+			subtitleText);
+		if (hasSubtitle && session.subtitleSource === 'llm') {
+			subtitle.title = 'Generated. Edit it and it stops being regenerated.';
+		}
+
+		const editButton = el('button', 'edit');
+		editButton.appendChild(icon('pencil'));
+		editButton.title = 'Edit subtitle';
+		editButton.setAttribute('aria-label', 'Edit subtitle for ' + session.title);
+		editButton.addEventListener('click', event => {
+			event.stopPropagation();
+			startEdit(row, session, 'subtitle');
+		});
+
+		const guardSubtitle = session.subtitleSource === 'manual';
+		const subtitleActions = el('span', 'row-actions');
+		if (!session.archived) {
+			subtitleActions.appendChild(editButton);
+			subtitleActions.appendChild(generateButton(session, 'status', {
+				iconName: 'clock',
+				label: 'Subtitle from recent status',
+				noun: 'subtitle',
+				guarded: guardSubtitle
+			}));
+			subtitleActions.appendChild(generateButton(session, 'task', {
+				iconName: 'notes',
+				label: 'Subtitle from task summary',
+				noun: 'subtitle',
+				guarded: guardSubtitle
+			}));
+		}
+		if (armed === session.sessionId + ':status' || armed === session.sessionId + ':task') {
+			subtitleActions.classList.add('has-armed');
+		}
+		subtitleLine.appendChild(subtitle);
+		subtitleLine.appendChild(subtitleActions);
+
+		row.appendChild(top);
+		row.appendChild(subtitleLine);
+
+		row.addEventListener('click', () => open(session.sessionId));
+		row.addEventListener('contextmenu', event => {
+			event.preventDefault();
+			openPopover(menuButton, session);
+		});
+		return row;
+	}
+
+	function open(sessionId) {
+		selectedId = sessionId;
+		send({ type: 'open', sessionId });
+	}
+
+	function focusOffset(delta) {
+		const rows = Array.from(document.querySelectorAll('.row'));
+		if (!rows.length) { return; }
+		const current = rows.findIndex(row => row === document.activeElement);
+		const next = Math.min(rows.length - 1, Math.max(0, (current === -1 ? 0 : current + delta)));
+		rows[next].focus();
+	}
+
+	// grouping is only ever by category, so the order is the order the categories were
+	// defined in and everything without one falls to the bottom
+	function groupSessions(sessions) {
+		if (state.settings.groupBy !== 'category') {
+			return [{ category: null, label: null, sessions: sessions }];
+		}
+		const groups = [];
+		for (const category of state.categories) {
+			const members = sessions.filter(session => session.categoryId === category.id);
+			if (members.length) {
+				groups.push({ category: category, label: category.name, sessions: members });
+			}
+		}
+		// a session pointing at a category that has since been deleted belongs here too
+		const known = new Set(state.categories.map(category => category.id));
+		const loose = sessions.filter(session => !known.has(session.categoryId));
+		if (loose.length) {
+			groups.push({ category: null, label: 'Uncategorised', sessions: loose });
+		}
+		return groups;
+	}
+
+	function sectionHeader(label, count, colour) {
+		const header = el('li', 'group');
+		// a heading inside a listbox is furniture, not an option
+		header.setAttribute('role', 'presentation');
+		const swatch = el('span', 'swatch');
+		if (colour) { swatch.style.setProperty('--swatch', colour); }
+		header.appendChild(swatch);
+		header.appendChild(el('span', 'group-name', label));
+		header.appendChild(el('span', 'group-count', String(count)));
+		return header;
+	}
+
+	function render() {
+		const now = Date.now();
+		closePopovers();
+		root.textContent = '';
+
+		const live = state.sessions.filter(session => !session.archived);
+		const archived = state.sessions.filter(session => session.archived);
+		// archived rows are out of sight by definition, so they don't get to ask for you
+		const unread = live.filter(session => session.needsAttention).length;
+
+		const toolbar = el('div', 'toolbar');
+		const categories = el('button', openPanel === 'categories' ? 'active' : null, 'Categories');
+		categories.title = openPanel === 'categories' ? 'Close categories' : 'Categories';
+		categories.setAttribute('aria-pressed', String(openPanel === 'categories'));
+		categories.addEventListener('click', () => togglePanel('categories'));
+		toolbar.appendChild(categories);
+
+		if (unread) {
+			const markRead = el('button', null, '✓ Mark all read');
+			markRead.addEventListener('click', () => send({ type: 'markAllRead' }));
+			toolbar.appendChild(markRead);
+		}
+
+		toolbar.appendChild(el('div', 'spacer'));
+		toolbar.appendChild(el('span', 'count',
+			unread ? unread + ' new · ' + live.length : String(live.length)));
+
+		const sort = el('button', 'icon');
+		sort.appendChild(icon('sort', 15));
+		sort.title = 'Sort, group and archived';
+		sort.setAttribute('aria-label', 'Sort, group and archived');
+		sort.addEventListener('click', event => {
+			event.stopPropagation();
+			openListMenu(sort);
+		});
+		toolbar.appendChild(sort);
+
+		const gear = el('button', openPanel === 'settings' ? 'icon active' : 'icon');
+		gear.appendChild(icon('gear', 15));
+		gear.title = openPanel === 'settings' ? 'Close settings' : 'Settings';
+		gear.setAttribute('aria-label', 'Settings');
+		gear.setAttribute('aria-pressed', String(openPanel === 'settings'));
+		gear.addEventListener('click', () => togglePanel('settings'));
+		toolbar.appendChild(gear);
+
+		const extensions = el('button', 'icon');
+		const logo = document.createElement('img');
+		logo.className = 'logo';
+		logo.src = document.body.dataset.logo || '';
+		logo.alt = '';
+		extensions.appendChild(logo);
+		extensions.title = 'View in Extensions';
+		extensions.setAttribute('aria-label', 'View in Extensions');
+		extensions.addEventListener('click', () => send({ type: 'openInExtensions' }));
+		toolbar.appendChild(extensions);
+
+		root.appendChild(toolbar);
+
+		if (openPanel === 'categories') {
+			root.appendChild(buildCategoriesPanel());
+		} else if (openPanel === 'settings') {
+			root.appendChild(buildSettingsPanel());
+		}
+
+		if (!state.sessions.length) {
+			root.appendChild(el('div', 'empty', state.archivedCount
+				? 'Everything here is archived. Show it again from the sort menu.'
+				: 'No chat sessions found for this window. Open a folder that has chat history, or start a chat.'));
+			return;
+		}
+
+		const list = el('ul', 'list');
+		list.setAttribute('role', 'listbox');
+		list.setAttribute('aria-label', 'Chat sessions');
+
+		for (const group of groupSessions(live)) {
+			if (group.label) {
+				list.appendChild(sectionHeader(group.label, group.sessions.length,
+					group.category ? group.category.colour : null));
+			}
+			for (const session of group.sessions) {
+				list.appendChild(buildRow(session, now));
+			}
+		}
+
+		// archived stays one block at the bottom whether or not the rest is grouped —
+		// scattering it back through the categories would defeat the point of archiving
+		if (archived.length) {
+			list.appendChild(sectionHeader('Archived', archived.length));
+			for (const session of archived) {
+				list.appendChild(buildRow(session, now));
+			}
+		}
+		root.appendChild(list);
+
+		// hidden archived sessions are otherwise invisible, and a count nobody can find is
+		// how you end up thinking a chat was deleted
+		if (!state.settings.showArchived && state.archivedCount) {
+			const footer = el('button', 'footer',
+				state.archivedCount + (state.archivedCount === 1 ? ' archived session' : ' archived sessions'));
+			footer.title = 'Show archived';
+			footer.addEventListener('click', () => send({ type: 'setSetting', key: 'showArchived', value: true }));
+			root.appendChild(footer);
+		}
+	}
+
+	document.addEventListener('click', closePopovers);
+
+	document.addEventListener('keydown', event => {
+		if (event.key === 'Escape') { closePopovers(); return; }
+		if (editingSubtitleFor) { return; }
+		if (event.key === 'ArrowDown') { event.preventDefault(); focusOffset(1); }
+		else if (event.key === 'ArrowUp') { event.preventDefault(); focusOffset(-1); }
+		else if (event.key === 'Enter' || event.key === ' ') {
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.dataset.sessionId) {
+				event.preventDefault();
+				open(active.dataset.sessionId);
+			}
+		}
+	});
+
+	window.addEventListener('message', event => {
+		const message = event.data;
+		if (message && message.type === 'openPanel') {
+			openPanel = message.panel;
+			render();
+			return;
+		}
+		if (message && message.type === 'render') {
+			state = {
+				sessions: message.sessions,
+				categories: message.categories,
+				models: message.models || [],
+				archivedCount: message.archivedCount || 0,
+				settings: Object.assign({}, DEFAULT_SETTINGS, message.settings)
+			};
+			// a redraw mid-edit would throw away what's being typed
+			if (!editingSubtitleFor) { render(); }
+		}
+	});
+
+	render();
+	send({ type: 'ready' });
+}());
+
+
+	document.getElementById = realGet;
+	window.addEventListener = realAdd;
+	Date.now = () => NOW;
+	const SETTINGS = Object.assign({ openTarget: 'dedicatedRight', dedicatedColumnRatio: 0.4, activeSeconds: 45, recentMinutes: 10, autoSubtitle: true, subtitleIdleSeconds: 120, subtitleMode: 'status', subtitleModel: '' }, listSettings);
+	// the provider sorts before posting, so anything rendering the view outside the
+	// extension has to sort for itself. mirrors compareSessions() in core/sessions.ts
+	const compare = SETTINGS.sortBy === 'created'
+		? (a, b) => (b.createdAt || b.lastActivityAt) - (a.createdAt || a.lastActivityAt)
+		: (a, b) => b.lastActivityAt - a.lastActivityAt;
+	const visible = (SETTINGS.showArchived ? SESSIONS : SESSIONS.filter(s => !s.archived)).slice().sort(compare);
+	const archivedCount = SESSIONS.filter(s => s.archived).length;
+	listeners.forEach(fn => fn({ data: { type: 'render', sessions: visible, categories: CATEGORIES, archivedCount: archivedCount, settings: SETTINGS, models: MODELS } }));
+	if (hostId === 'host-light') {
+		listeners.forEach(fn => fn({ data: { type: 'openPanel', panel: 'settings' } }));
+	}
+}
+
+// dark shows the new list shape: grouped by category, archived section at the bottom.
+// light keeps the settings panel open and hides archived, so the footer count shows
+mount('host-dark', { sortBy: 'activity', groupBy: 'category', showArchived: true });
+mount('host-light', { sortBy: 'created', groupBy: 'none', showArchived: false });
+</script>
+</body>
+</html>

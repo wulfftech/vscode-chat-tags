@@ -1,0 +1,226 @@
+{
+	"name": "chat-tags",
+	"displayName": "Chat Tags",
+	"description": "Colour-code, categorise and annotate VS Code chat sessions.",
+	"license": "MIT",
+	"icon": "media/icon.png",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/wulfftech/vscode-chat-tags.git"
+	},
+	"bugs": {
+		"url": "https://github.com/wulfftech/vscode-chat-tags/issues"
+	},
+	"homepage": "https://github.com/wulfftech/vscode-chat-tags#readme",
+	"version": "0.10.0",
+	"publisher": "wulfftech",
+	"engines": {
+		"vscode": "^1.104.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"main": "./out/extension.js",
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "chatTags",
+					"title": "Chat Tags",
+					"icon": "media/activity.png"
+				}
+			]
+		},
+		"views": {
+			"chatTags": [
+				{
+					"id": "chatTags.sessions",
+					"name": "Sessions",
+					"type": "webview"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "chatTags.manageCategories",
+				"title": "Edit Categories",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.refresh",
+				"title": "Refresh",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.showLog",
+				"title": "Show Log",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.runNavigationSpike",
+				"title": "Run Navigation Spike (diagnostic)",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.generateSubtitle",
+				"title": "Generate Subtitle — Recent Status",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.openSettings",
+				"title": "Settings",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.generateTaskSubtitle",
+				"title": "Generate Subtitle — Task Summary",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.regenerateTitle",
+				"title": "Regenerate Session Title",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.archiveSession",
+				"title": "Archive Session",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.deleteSession",
+				"title": "Delete Session",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.toggleGroupByCategory",
+				"title": "Group by Category",
+				"category": "Chat Tags"
+			},
+			{
+				"command": "chatTags.toggleShowArchived",
+				"title": "Show Archived Sessions",
+				"category": "Chat Tags"
+			}
+		],
+		"menus": {},
+		"configuration": {
+			"title": "Chat Tags",
+			"properties": {
+				"chatTags.openTarget": {
+					"type": "string",
+					"enum": [
+						"activeGroup",
+						"beside",
+						"dedicatedRight"
+					],
+					"default": "activeGroup",
+					"enumDescriptions": [
+						"Open the session in the currently active editor group.",
+						"Split to the side and open there.",
+						"Keep a full-height column on the right and open every session into it."
+					],
+					"description": "Where a chat session opens when you click it in Chat Tags."
+				},
+				"chatTags.dedicatedColumnRatio": {
+					"type": "number",
+					"default": 0.4,
+					"minimum": 0.2,
+					"maximum": 0.8,
+					"description": "Share of editor width given to the dedicated column, when 'dedicatedRight' is in use."
+				},
+				"chatTags.activeSeconds": {
+					"type": "number",
+					"default": 45,
+					"minimum": 5,
+					"maximum": 600,
+					"description": "A session counts as actively responding for this many seconds after its last change."
+				},
+				"chatTags.recentMinutes": {
+					"type": "number",
+					"default": 10,
+					"minimum": 1,
+					"maximum": 1440,
+					"description": "A session counts as recently touched for this many minutes after its last change."
+				},
+				"chatTags.autoSubtitle": {
+					"type": "boolean",
+					"default": false,
+					"description": "Generate a subtitle with a language model when a session goes quiet. Off by default — every generation is a billable request against your chat provider."
+				},
+				"chatTags.subtitleIdleSeconds": {
+					"type": "number",
+					"default": 120,
+					"minimum": 10,
+					"maximum": 3600,
+					"description": "How long a session must sit still before an automatic subtitle is generated."
+				},
+				"chatTags.subtitleMode": {
+					"type": "string",
+					"enum": [
+						"status",
+						"task"
+					],
+					"default": "status",
+					"enumDescriptions": [
+						"Where the session is right now, read from its most recent messages.",
+						"What the session was asked to do, read from its opening messages."
+					],
+					"description": "What a plain 'Generate subtitle' produces, and what automatic generation uses."
+				},
+				"chatTags.subtitleModel": {
+					"type": "string",
+					"default": "",
+					"description": "Model used for generation, by id. Empty picks the cheapest model the window has. Choose one in the Chat Tags pane rather than typing it here."
+				},
+				"chatTags.sortBy": {
+					"type": "string",
+					"enum": [
+						"activity",
+						"created"
+					],
+					"default": "activity",
+					"enumDescriptions": [
+						"Newest last message first, taken from the session file mtime.",
+						"Newest session first, taken from the creation date in its header."
+					],
+					"description": "Order of the session list."
+				},
+				"chatTags.groupBy": {
+					"type": "string",
+					"enum": [
+						"none",
+						"category"
+					],
+					"default": "none",
+					"enumDescriptions": [
+						"One flat list.",
+						"A heading per category, with everything unassigned at the bottom."
+					],
+					"description": "How the session list is grouped."
+				},
+				"chatTags.showArchived": {
+					"type": "boolean",
+					"default": false,
+					"description": "Show archived sessions, in their own section at the bottom of the list."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./",
+		"probe": "node scripts/probe.mjs",
+		"probe:exchange": "node scripts/probe-exchange.mjs",
+		"package": "npm run clean && tsc -p ./ && vsce package",
+		"clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\""
+	},
+	"devDependencies": {
+		"@types/node": "^20.11.0",
+		"@types/vscode": "^1.104.0",
+		"typescript": "^5.6.0",
+		"@vscode/vsce": "^3.2.0"
+	}
+}

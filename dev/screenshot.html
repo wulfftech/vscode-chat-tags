@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chat Tags</title>
+<style>
+/* row height matches the built-in chat sessions list (ITEM_HEIGHT = 54) so the two
+   views sit side by side without looking like different products */
+
+:root {
+	--row-height: 54px;
+	--stripe-width: 3px;
+	/* resting rows sit high enough to read the colour at a glance; attention rows get
+	   the remaining headroom plus the left border, so the border means one thing only */
+	--wash-rest: 22%;
+	--wash-hover: 30%;
+	--wash-attention: 42%;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	padding: 0;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	color: var(--vscode-foreground);
+	background: transparent;
+	user-select: none;
+}
+
+button {
+	font-family: inherit;
+	color: inherit;
+	background: none;
+	border: none;
+	cursor: pointer;
+}
+
+.toolbar {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+	padding: 5px 8px;
+	position: sticky;
+	top: 0;
+	z-index: 3;
+	background: var(--vscode-sideBar-background, transparent);
+	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.toolbar button {
+	font-size: 11px;
+	border-radius: 4px;
+	padding: 3px 7px;
+	opacity: 0.85;
+}
+
+.toolbar button:hover {
+	background: var(--vscode-list-hoverBackground);
+	opacity: 1;
+}
+
+.toolbar button.active {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+	opacity: 1;
+}
+
+.toolbar .spacer {
+	flex: 1;
+}
+
+.count {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.row {
+	position: relative;
+	height: var(--row-height);
+	padding: 8px 10px 8px 14px;
+	display: grid;
+	grid-template-rows: auto auto;
+	align-content: center;
+	gap: 2px;
+	cursor: pointer;
+	border-left: var(--stripe-width) solid transparent;
+	outline: none;
+}
+
+.row[data-category] {
+	background: color-mix(in srgb, var(--row-colour) var(--wash-rest), transparent);
+}
+
+.row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.row[data-category]:hover {
+	background: color-mix(in srgb, var(--row-colour) var(--wash-hover), var(--vscode-list-hoverBackground));
+}
+
+/* the one signal that means "this wants you": full-strength wash, the left border,
+   and a heavier title. nothing else in the view uses the border */
+.row[data-attention="true"] {
+	border-left-color: var(--row-colour, var(--vscode-focusBorder));
+}
+
+.row[data-attention="true"][data-category] {
+	background: color-mix(in srgb, var(--row-colour) var(--wash-attention), transparent);
+}
+
+.row[data-attention="true"] .title {
+	font-weight: 600;
+}
+
+.row.selected {
+	background: var(--vscode-list-activeSelectionBackground);
+	color: var(--vscode-list-activeSelectionForeground);
+}
+
+.row:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.line {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--dot-colour, var(--vscode-descriptionForeground));
+}
+
+/* activity reads as intensity rather than hue, so category colour stays the signal
+   for "what is this" and brightness stays the signal for "is it moving" */
+.row[data-state="idle"] .dot { opacity: 0.7; }
+.row[data-state="recent"] .dot { opacity: 0.88; }
+.row[data-state="active"] .dot { opacity: 1; }
+.row[data-attention="true"] .dot {
+	opacity: 1;
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-colour, var(--vscode-focusBorder)) 30%, transparent);
+}
+
+.title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 13px;
+}
+
+.subtitle-line {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding-left: 14px;
+	min-width: 0;
+}
+
+.subtitle {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* the subtitle text is no longer a click target — editing needs the pencil, so
+   clicking anywhere on the row reliably opens the session */
+.edit {
+	flex: 0 0 auto;
+	opacity: 0;
+	font-size: 11px;
+	line-height: 1;
+	padding: 1px 3px;
+	border-radius: 3px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row:hover .edit,
+.row:focus-within .edit {
+	opacity: 0.75;
+}
+
+.edit:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+.subtitle.placeholder {
+	opacity: 0.65;
+	font-style: italic;
+}
+
+.row-input {
+	flex: 1;
+	min-width: 0;
+	font-family: inherit;
+	font-size: 11px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, transparent);
+	border: 1px solid var(--vscode-focusBorder);
+	border-radius: 3px;
+	padding: 1px 4px;
+	outline: none;
+}
+
+/* ── in-pane panels ───────────────────────────────────────── */
+
+.panel {
+	border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+	background: var(--vscode-sideBar-background, transparent);
+	padding: 8px;
+}
+
+.panel h2 {
+	margin: 0 0 6px;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--vscode-descriptionForeground);
+	font-weight: 600;
+}
+
+.cat-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 0;
+}
+
+.cat-row input[type="color"] {
+	flex: 0 0 auto;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--vscode-contrastBorder, transparent);
+	border-radius: 4px;
+	background: none;
+	cursor: pointer;
+}
+
+.cat-row input[type="text"] {
+	flex: 1;
+	min-width: 0;
+	font-family: inherit;
+	font-size: 12px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, transparent);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 3px;
+	padding: 3px 6px;
+	outline: none;
+}
+
+.cat-row input[type="text"]:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.cat-row .remove {
+	flex: 0 0 auto;
+	opacity: 0.6;
+	font-size: 13px;
+	padding: 0 4px;
+}
+
+.cat-row .remove:hover {
+	opacity: 1;
+	color: var(--vscode-errorForeground, inherit);
+}
+
+.panel .add {
+	font-size: 11px;
+	margin-top: 6px;
+	padding: 3px 7px;
+	border-radius: 4px;
+	border: 1px dashed var(--vscode-descriptionForeground);
+	opacity: 0.8;
+}
+
+.panel .add:hover {
+	opacity: 1;
+	background: var(--vscode-list-hoverBackground);
+}
+
+.panel .hint {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin-top: 6px;
+	line-height: 1.4;
+}
+
+.section {
+	margin-top: 12px;
+	padding-top: 8px;
+	border-top: 1px solid var(--vscode-sideBarSectionHeader-border, transparent);
+}
+
+.opt-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 7px;
+	width: 100%;
+	text-align: left;
+	padding: 4px 5px;
+	border-radius: 4px;
+}
+
+.opt-row:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+.opt-row.chosen .opt-label {
+	font-weight: 600;
+}
+
+.opt-row .radio {
+	flex: 0 0 auto;
+	font-size: 10px;
+	line-height: 15px;
+	opacity: 0.8;
+}
+
+.opt-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.opt-label {
+	font-size: 12px;
+}
+
+.opt-hint {
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.35;
+}
+
+.field {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 5px;
+}
+
+.field-label {
+	flex: 1;
+	font-size: 12px;
+	min-width: 0;
+}
+
+/* the slider needs the room, so its label gives up the flex share */
+.field-label.narrow {
+	flex: 0 0 auto;
+}
+
+.field-suffix {
+	flex: 0 0 auto;
+	font-size: 10px;
+	color: var(--vscode-descriptionForeground);
+	min-width: 26px;
+}
+
+.field input[type="number"] {
+	flex: 0 0 auto;
+	width: 52px;
+	font-family: inherit;
+	font-size: 12px;
+	color: var(--vscode-input-foreground, var(--vscode-foreground));
+	background: var(--vscode-input-background, transparent);
+	border: 1px solid var(--vscode-input-border, transparent);
+	border-radius: 3px;
+	padding: 2px 5px;
+	outline: none;
+}
+
+.field input[type="number"]:focus {
+	border-color: var(--vscode-focusBorder);
+}
+
+.field input[type="range"] {
+	flex: 1 1 auto;
+	min-width: 0;
+	accent-color: var(--vscode-focusBorder);
+}
+
+/* category assignment popover, anchored under the row's ⋯ button */
+.popover {
+	position: absolute;
+	z-index: 10;
+	min-width: 150px;
+	padding: 4px;
+	border-radius: 5px;
+	background: var(--vscode-menu-background, var(--vscode-sideBar-background));
+	color: var(--vscode-menu-foreground, var(--vscode-foreground));
+	border: 1px solid var(--vscode-menu-border, var(--vscode-contrastBorder, transparent));
+	box-shadow: 0 3px 10px rgba(0, 0, 0, 0.36);
+}
+
+.popover button {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+	text-align: left;
+	font-size: 12px;
+	padding: 4px 6px;
+	border-radius: 3px;
+}
+
+.popover button:hover {
+	background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-menu-selectionForeground, inherit);
+}
+
+.popover .swatch {
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--swatch, transparent);
+	border: 1px solid var(--vscode-descriptionForeground);
+}
+
+.popover .sep {
+	height: 1px;
+	margin: 4px 2px;
+	background: var(--vscode-menu-separatorBackground, var(--vscode-sideBarSectionHeader-border, transparent));
+}
+
+.empty {
+	padding: 16px 12px;
+	font-size: 12px;
+	color: var(--vscode-descriptionForeground);
+	line-height: 1.5;
+}
+
+.subtitle.generating {
+	opacity: 0.7;
+	font-style: italic;
+	animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%, 100% { opacity: 0.45; }
+	50% { opacity: 0.85; }
+}
+
+.field.toggle {
+	gap: 6px;
+}
+
+.field.toggle input[type="checkbox"] {
+	flex: 0 0 auto;
+	margin: 0;
+	accent-color: var(--vscode-focusBorder);
+}
+
+.field.toggle label {
+	font-size: 11px;
+	color: var(--vscode-foreground);
+	cursor: pointer;
+}
+
+.toolbar button.icon {
+	flex: 0 0 auto;
+	width: 22px;
+	padding: 3px 0;
+	font-size: 13px;
+	line-height: 1;
+	text-align: center;
+}
+
+/* the settings panel leads with a section, which would otherwise draw a rule under the
+   toolbar's own border */
+.panel > .section:first-child {
+	margin-top: 0;
+	padding-top: 0;
+	border-top: none;
+}
+
+.panel .sub-label {
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+	margin: 2px 0 4px;
+	opacity: 0.85;
+}
+
+/* a renamed session gets a hairline under the title — enough to notice, not enough to
+   compete with the attention border */
+.title[data-overridden="true"] {
+	text-decoration: underline;
+	text-decoration-style: dotted;
+	text-decoration-color: var(--vscode-descriptionForeground);
+	text-underline-offset: 3px;
+}
+
+/* ── row buttons ────────────────────────────────────────── */
+
+/* the controls collapse to nothing when the row isn't hovered. they used to hold their
+   width while invisible, which cost the title about 60px of every row for no reason */
+.row-actions {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	width: 0;
+	overflow: hidden;
+}
+
+.row:hover .row-actions,
+.row:focus-within .row-actions,
+.row-actions.has-armed {
+	width: auto;
+	overflow: visible;
+}
+
+.gen {
+	flex: 0 0 auto;
+	opacity: 0;
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 3px;
+	border-radius: 3px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row:hover .gen,
+.row:focus-within .gen {
+	opacity: 0.75;
+}
+
+.gen:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+/* the field was written by hand — say so before it gets overwritten */
+.row:hover .gen.guarded,
+.row:focus-within .gen.guarded {
+	opacity: 0.35;
+}
+
+.gen.guarded:hover {
+	opacity: 0.6;
+}
+
+/* armed stays visible whether or not the row is hovered — it is a live decision */
+.row .gen.armed,
+.row:hover .gen.armed,
+.gen.armed:hover {
+	opacity: 1;
+	color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+	background: var(--vscode-inputValidation-warningBackground, var(--vscode-list-hoverBackground));
+	box-shadow: inset 0 0 0 1px var(--vscode-inputValidation-warningBorder, var(--vscode-focusBorder));
+}
+
+/* the title row's controls sit to the right of the title, same as the subtitle's */
+.line .edit,
+.line .gen {
+	margin-left: 0;
+}
+
+.edit svg,
+.gen svg,
+.actions svg {
+	display: block;
+}
+
+/* ── toolbar ────────────────────────────────────────────── */
+
+.toolbar button.icon svg {
+	display: block;
+	margin: 0 auto;
+}
+
+.toolbar .logo {
+	display: block;
+	width: 15px;
+	height: 15px;
+	margin: 0 auto;
+	/* the logo is already a finished thing — no theme tinting, just size it */
+	object-fit: contain;
+}
+
+/* an open panel is closed by the same button that opened it, so the button has to
+   read as pressed rather than merely hovered */
+.toolbar button.active,
+.toolbar button.icon.active {
+	background: var(--vscode-inputOption-activeBackground, var(--vscode-list-activeSelectionBackground));
+	color: var(--vscode-inputOption-activeForeground, var(--vscode-list-activeSelectionForeground));
+	box-shadow: inset 0 0 0 1px var(--vscode-inputOption-activeBorder, var(--vscode-focusBorder));
+	opacity: 1;
+}
+
+/* ── model picker ───────────────────────────────────────── */
+
+.field select {
+	flex: 1;
+	min-width: 0;
+	font-family: inherit;
+	font-size: 11px;
+	padding: 2px 4px;
+	border-radius: 3px;
+	color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+	background: var(--vscode-dropdown-background, var(--vscode-input-background));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, transparent));
+}
+
+.field select:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.field.empty select {
+	opacity: 0.6;
+}
+
+/* the title line runs at 13px, so its editor has to as well or the row jumps */
+.title-input {
+	font-size: 13px;
+}
+
+/* the title's own controls live in the same collapsing group, so the ⋯ no longer holds
+   a permanent column on the right either */
+.line .row-actions,
+.subtitle-line .row-actions {
+	margin-left: 2px;
+}
+
+.actions {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	padding: 1px 3px;
+	border-radius: 3px;
+	opacity: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.row:hover .actions,
+.row:focus-within .actions,
+.row-actions.has-armed .actions {
+	opacity: 0.75;
+}
+
+.actions:hover {
+	opacity: 1;
+	color: var(--vscode-foreground);
+	background: var(--vscode-list-hoverBackground);
+}
+
+/* ── grouping ───────────────────────────────────────────── */
+
+/* a group heading is furniture, so it sits below the toolbar but above the rows it
+   introduces and never takes the row treatment */
+.group {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 10px 3px 14px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+	cursor: default;
+}
+
+.group .swatch {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--swatch, transparent);
+	border: 1px solid var(--vscode-descriptionForeground);
+}
+
+.group-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.group-count {
+	flex: 0 0 auto;
+	font-weight: 400;
+	opacity: 0.7;
+}
+
+/* ── archived ───────────────────────────────────────────── */
+
+/* archived rows are still readable, just clearly set aside. the category wash goes with
+   them — colour is a working signal and these aren't being worked on */
+.row.archived {
+	opacity: 0.55;
+	background: none;
+}
+
+.row.archived:hover {
+	opacity: 0.85;
+	background: var(--vscode-list-hoverBackground);
+}
+
+.row.archived .dot {
+	opacity: 0.4;
+}
+
+/* the count of what's hidden, and the way back to it */
+.footer {
+	display: block;
+	width: 100%;
+	text-align: left;
+	padding: 8px 10px 10px 14px;
+	font-size: 11px;
+	color: var(--vscode-descriptionForeground);
+}
+
+.footer:hover {
+	color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+	text-decoration: underline;
+}
+
+/* ── menus ──────────────────────────────────────────────── */
+
+.popover .menu-label {
+	padding: 4px 6px 2px;
+	font-size: 10px;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* fixed width so labels don't shift sideways as the tick comes and goes */
+.popover .tick {
+	flex: 0 0 auto;
+	width: 10px;
+	font-size: 11px;
+	text-align: center;
+	color: var(--vscode-foreground);
+}
+
+/* an entry that isn't a category has nothing to swatch, and a hollow circle beside
+   'Archive' reads as an unset radio button */
+.popover button.plain .swatch,
+.popover button.danger .swatch {
+	border-color: transparent;
+}
+
+.popover button.danger {
+	color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+.popover button.danger:hover {
+	background: var(--vscode-inputValidation-errorBackground, var(--vscode-list-hoverBackground));
+	color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+
+html, body { margin: 0; padding: 0; }
+body {
+	width: 1100px;
+	font-family: -apple-system, "Segoe UI", sans-serif;
+	background: #101014;
+	background-image: radial-gradient(120% 90% at 50% 0%, #1c1c24 0%, #0d0d10 70%);
+}
+.sheet {
+	display: grid;
+	grid-template-columns: repeat(3, 340px);
+	gap: 18px;
+	padding: 22px;
+	justify-content: start;
+}
+.pane {
+	margin: 0;
+	width: 340px;
+	--vscode-font-family: -apple-system, "Segoe UI", sans-serif;
+	--vscode-font-size: 13px;
+}
+.pane .host {
+	position: relative;
+	overflow: hidden;
+	border-radius: 8px;
+	box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+
+/* a pane is a fixed window onto a scrolling list, so something is always half-cut at the
+   bottom. fading it says 'there is more' instead of 'the render broke' */
+.pane .host::after {
+	content: "";
+	position: absolute;
+	inset: auto 0 0 0;
+	height: 46px;
+	pointer-events: none;
+	background: linear-gradient(transparent, var(--vscode-sideBar-background));
+}
+.pane figcaption {
+	padding: 9px 2px 0;
+	font-size: 12px;
+	letter-spacing: 0.01em;
+	color: #8b8b96;
+}
+#pane-grouped .host { height: 720px; } #pane-settings .host { height: 720px; } #pane-categories .host { height: 720px; } #pane-sort .host { height: 470px; } #pane-rowmenu .host { height: 470px; } #pane-buttons .host { height: 470px; }
+
+/* a lifted menu clone lives on the body, outside every .pane, so it has to carry the
+   theme itself or it paints with no background at all */
+.pane.dark, .shot-dark { --vscode-foreground:#cccccc;--vscode-descriptionForeground:#9d9d9d;--vscode-sideBar-background:#181818;--vscode-sideBarSectionHeader-border:#2b2b2b;--vscode-list-hoverBackground:#2a2d2e;--vscode-list-activeSelectionBackground:#04395e;--vscode-list-activeSelectionForeground:#ffffff;--vscode-inputOption-activeBackground:#0078d44d;--vscode-inputOption-activeBorder:#0078d4;--vscode-inputOption-activeForeground:#ffffff;--vscode-menu-background:#1f1f1f;--vscode-menu-foreground:#cccccc;--vscode-menu-border:#454545;--vscode-menu-selectionBackground:#0078d4;--vscode-menu-separatorBackground:#454545;--vscode-input-background:#313131;--vscode-input-border:#3c3c3c;--vscode-dropdown-background:#313131;--vscode-dropdown-border:#3c3c3c;--vscode-errorForeground:#f85149;--vscode-textLink-foreground:#4daafc;--vscode-focusBorder:#0078d4; }
+.pane.dark .host { background: #181818; color: #cccccc; }
+.pane.light, .shot-light { --vscode-foreground:#3b3b3b;--vscode-descriptionForeground:#767676;--vscode-sideBar-background:#f8f8f8;--vscode-sideBarSectionHeader-border:#e5e5e5;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#0060c0;--vscode-list-activeSelectionForeground:#ffffff;--vscode-inputOption-activeBackground:#005fb826;--vscode-inputOption-activeBorder:#005fb8;--vscode-inputOption-activeForeground:#000000;--vscode-menu-background:#ffffff;--vscode-menu-foreground:#3b3b3b;--vscode-menu-border:#cecece;--vscode-menu-selectionBackground:#005fb8;--vscode-menu-separatorBackground:#d4d4d4;--vscode-input-background:#ffffff;--vscode-input-border:#cecece;--vscode-dropdown-background:#ffffff;--vscode-dropdown-border:#cecece;--vscode-errorForeground:#c72e0f;--vscode-textLink-foreground:#005fb8;--vscode-focusBorder:#005fb8; }
+.pane.light .host { background: #f8f8f8; color: #3b3b3b; }
+
+/* the real popover is clamped to the webview's own width. here it gets clamped to its
+   pane instead, which is the same thing at the same size */
+.popover { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5); }
+</style>
+</head>
+<body data-logo="data:image/png;base64,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">
+<div class="sheet">
+	<figure class="pane dark" id="pane-grouped">
+		<div class="host" id="host-grouped"></div>
+		<figcaption>Grouped by category, archived at the bottom</figcaption>
+	</figure>
+	<figure class="pane light" id="pane-settings">
+		<div class="host" id="host-settings"></div>
+		<figcaption>Every setting lives in the pane</figcaption>
+	</figure>
+	<figure class="pane dark" id="pane-categories">
+		<div class="host" id="host-categories"></div>
+		<figcaption>Categories — name, colour, delete</figcaption>
+	</figure>
+	<figure class="pane light" id="pane-sort">
+		<div class="host" id="host-sort"></div>
+		<figcaption>Sort, group, show archived</figcaption>
+	</figure>
+	<figure class="pane dark" id="pane-rowmenu">
+		<div class="host" id="host-rowmenu"></div>
+		<figcaption>Assign, archive or delete a session</figcaption>
+	</figure>
+	<figure class="pane light" id="pane-buttons">
+		<div class="host" id="host-buttons"></div>
+		<figcaption>Row buttons, revealed on hover</figcaption>
+	</figure></div>
+
+<script>
+const NOW = 1787000000000;
+const CATEGORIES = [{"id":"c1","name":"Homelab","colour":"#3794ff"},{"id":"c2","name":"Stonks","colour":"#3fb950"},{"id":"c3","name":"Bug hunt","colour":"#e5534b"},{"id":"c4","name":"Research","colour":"#a371f7"}];
+const MODELS = [{"id":"gpt-4o-mini","name":"GPT-4o mini","family":"gpt-4o-mini","vendor":"copilot"},{"id":"stealth/ox-alpha","name":"Ox Alpha","family":"ox","vendor":"openrouter"},{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5","family":"haiku","vendor":"openrouter"}];
+const SESSIONS = [{"sessionId":"s1","title":"Start from SESSION_PROMPT_PHASE_19_WAVES.md","subtitle":"Waiting for API key","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":1,"activity":"active","generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999988000,"createdAt":1786999136000},{"sessionId":"s2","title":"Forward-accumulating dataset collectors","subtitle":"Blocked on schema migration","titleOverridden":true,"titleSource":"llm","categoryId":"c2","requestCount":15,"activity":"recent","generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999910000,"createdAt":1786136000000},{"sessionId":"s3","title":"Upgrade OpenVPN access server","titleOverridden":false,"categoryId":"c1","requestCount":1,"activity":"recent","generating":true,"archived":false,"needsAttention":false,"lastActivityAt":1786999604000,"createdAt":1786999481600},{"sessionId":"s4","title":"Assess public datasets for stonks db","subtitle":"Reviewing 42 candidate sources","titleOverridden":false,"categoryId":"c4","requestCount":6,"activity":"idle","generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786925360000,"createdAt":1786919648000},{"sessionId":"s5","title":"Backslash parsing issue in command","subtitle":"Fixed — needs regression test","subtitleSource":"manual","titleOverridden":true,"titleSource":"manual","categoryId":"c3","requestCount":1,"activity":"idle","generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786994420000,"createdAt":1786993952000},{"sessionId":"s6","title":"PATH config review for pipreqs","titleOverridden":false,"requestCount":2,"activity":"idle","generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786680620000,"createdAt":1786680320000},{"sessionId":"s7","title":"A deliberately very long session title that should ellipsize rather than wrap","titleOverridden":false,"categoryId":"c1","requestCount":9,"activity":"idle","generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786934480000,"createdAt":1786934336000},{"sessionId":"s8","title":"Macquarie CSV exporter cookie jar","subtitle":"Abandoned — auth token is not a cookie","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":31,"activity":"idle","generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786500020000,"createdAt":1786481600000},{"sessionId":"s9","title":"Old irrigation caddy notes","titleOverridden":false,"requestCount":4,"activity":"idle","generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786300040000,"createdAt":1786291520000}];
+const PANES = [{"id":"grouped","theme":"dark","height":720,"caption":"Grouped by category, archived at the bottom","settings":{"sortBy":"activity","groupBy":"category","showArchived":true}},{"id":"settings","theme":"light","height":720,"caption":"Every setting lives in the pane","settings":{"sortBy":"activity","groupBy":"none","showArchived":false},"panel":"settings"},{"id":"categories","theme":"dark","height":720,"caption":"Categories — name, colour, delete","settings":{"sortBy":"activity","groupBy":"none","showArchived":false},"panel":"categories"},{"id":"sort","theme":"light","height":470,"caption":"Sort, group, show archived","settings":{"sortBy":"created","groupBy":"none","showArchived":false},"menu":"sort"},{"id":"rowmenu","theme":"dark","height":470,"caption":"Assign, archive or delete a session","settings":{"sortBy":"activity","groupBy":"none","showArchived":false},"menu":"row","hoverRow":1},{"id":"buttons","theme":"light","height":470,"caption":"Row buttons, revealed on hover","settings":{"sortBy":"activity","groupBy":"none","showArchived":false},"hoverRow":3}];
+
+// view.js binds to #root and window messages, so each pane gets its own run with those
+// two things scoped to it
+function mount(pane) {
+	const host = document.getElementById('host-' + pane.id);
+	const root = document.createElement('div');
+	root.id = 'root';
+	host.appendChild(root);
+
+	const realGet = document.getElementById.bind(document);
+	document.getElementById = id => (id === 'root' ? root : realGet(id));
+
+	const listeners = [];
+	const realAdd = window.addEventListener.bind(window);
+	window.addEventListener = (type, fn, opts) => {
+		if (type === 'message') { listeners.push(fn); } else { realAdd(type, fn, opts); }
+	};
+	window.acquireVsCodeApi = () => ({ postMessage: () => {} });
+
+	// @ts-check
+(function () {
+	const vscode = acquireVsCodeApi();
+	const root = document.getElementById('root');
+
+	const DEFAULT_SETTINGS = {
+		openTarget: 'activeGroup', dedicatedColumnRatio: 0.4, activeSeconds: 45, recentMinutes: 10,
+		autoSubtitle: false, subtitleIdleSeconds: 120, subtitleMode: 'status', subtitleModel: '',
+		sortBy: 'activity', groupBy: 'none', showArchived: false
+	};
+	let state = { sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0 };
+	let selectedId = null;
+	// null | 'categories' | 'settings' — one at a time, they are separate things
+	let openPanel = null;
+	let editingSubtitleFor = null;
+
+	// inline svg rather than text glyphs — a glyph renders at whatever weight the user's
+	// font decides, and ⚙ in particular lands as an emoji on some systems
+	const SVG_NS = 'http://www.w3.org/2000/svg';
+	const ICON_PATHS = {
+		gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z',
+		refresh: 'M17.65 6.35A7.96 7.96 0 0 0 12 4c-4.42 0-7.99 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
+		clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z',
+		notes: 'M14 17H4v2h10v-2zM20 9H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z',
+		pencil: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+		dots: 'M6 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm12 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-6 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4z',
+		sort: 'M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z',
+		archive: 'M20.54 5.23l-1.39-1.68A1.45 1.45 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23A1.98 1.98 0 0 0 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z',
+		unarchive: 'M20.55 5.22l-1.39-1.68A1.51 1.51 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z',
+		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z'
+	};
+
+	function icon(name, size) {
+		const svg = document.createElementNS(SVG_NS, 'svg');
+		svg.setAttribute('viewBox', '0 0 24 24');
+		svg.setAttribute('width', String(size || 13));
+		svg.setAttribute('height', String(size || 13));
+		svg.setAttribute('aria-hidden', 'true');
+		svg.setAttribute('focusable', 'false');
+		const path = document.createElementNS(SVG_NS, 'path');
+		path.setAttribute('d', ICON_PATHS[name]);
+		path.setAttribute('fill', 'currentColor');
+		svg.appendChild(path);
+		return svg;
+	}
+
+	function relativeTime(timestamp, now) {
+		const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
+		if (seconds < 60) { return seconds + 's ago'; }
+		const minutes = Math.round(seconds / 60);
+		if (minutes < 60) { return minutes + 'm ago'; }
+		const hours = Math.round(minutes / 60);
+		if (hours < 24) { return hours + 'h ago'; }
+		return Math.round(hours / 24) + 'd ago';
+	}
+
+	function el(tag, className, text) {
+		const node = document.createElement(tag);
+		if (className) { node.className = className; }
+		// titles come from session files on disk — always set as text, never as html
+		if (text !== undefined) { node.textContent = text; }
+		return node;
+	}
+
+	function send(message) {
+		vscode.postMessage(message);
+	}
+
+	function togglePanel(panel) {
+		openPanel = openPanel === panel ? null : panel;
+		render();
+	}
+
+	function closePopovers() {
+		document.querySelectorAll('.popover').forEach(node => node.remove());
+	}
+
+	// ── popovers ──────────────────────────────────────────────
+
+	// anchored under whichever button opened it, clamped to the pane so a menu opened on
+	// the right-hand edge of a narrow sidebar still lands fully on screen
+	function placePopover(popover, anchor) {
+		document.body.appendChild(popover);
+		const box = anchor.getBoundingClientRect();
+		const width = popover.offsetWidth;
+		popover.style.top = (box.bottom + window.scrollY + 2) + 'px';
+		popover.style.left = Math.max(4, Math.min(box.left, window.innerWidth - width - 6)) + 'px';
+	}
+
+	function addAction(popover, label, run, className) {
+		const button = el('button', className);
+		button.appendChild(el('span', 'swatch'));
+		button.appendChild(el('span', null, label));
+		button.addEventListener('click', event => {
+			event.stopPropagation();
+			closePopovers();
+			run();
+		});
+		popover.appendChild(button);
+		return button;
+	}
+
+	// a checkable menu entry — the tick keeps its column whether or not it is set, so the
+	// labels don't shuffle sideways as you toggle things
+	function addChoice(popover, label, checked, run) {
+		const button = el('button');
+		button.appendChild(el('span', 'tick', checked ? '✓' : ''));
+		button.appendChild(el('span', null, label));
+		button.setAttribute('aria-checked', String(checked));
+		button.setAttribute('role', 'menuitemcheckbox');
+		button.addEventListener('click', event => {
+			event.stopPropagation();
+			closePopovers();
+			run();
+		});
+		popover.appendChild(button);
+		return button;
+	}
+
+	// the row's ⋯ menu: categories, then the two things that take a session out of the list
+	function openPopover(anchor, session) {
+		closePopovers();
+		const popover = el('div', 'popover');
+
+		for (const category of state.categories) {
+			const button = el('button');
+			const swatch = el('span', 'swatch');
+			swatch.style.setProperty('--swatch', category.colour);
+			button.appendChild(swatch);
+			button.appendChild(el('span', null, category.name + (category.id === session.categoryId ? '  ✓' : '')));
+			button.addEventListener('click', event => {
+				event.stopPropagation();
+				closePopovers();
+				send({ type: 'setCategory', sessionId: session.sessionId, categoryId: category.id });
+			});
+			popover.appendChild(button);
+		}
+
+		if (state.categories.length) {
+			popover.appendChild(el('div', 'sep'));
+		}
+
+		addAction(popover, 'No category',
+			() => send({ type: 'setCategory', sessionId: session.sessionId, categoryId: null }));
+		addAction(popover, 'Edit categories…', () => { openPanel = 'categories'; render(); }, 'plain');
+
+		popover.appendChild(el('div', 'sep'));
+
+		addAction(popover, session.archived ? 'Restore from archive' : 'Archive',
+			() => send({ type: 'setArchived', sessionId: session.sessionId, archived: !session.archived }), 'plain');
+
+		// vs code runs its own confirmation, which is why this reads as a dialog opener
+		addAction(popover, 'Delete…',
+			() => send({ type: 'deleteSession', sessionId: session.sessionId }), 'danger');
+
+		placePopover(popover, anchor);
+	}
+
+	// ── list menu ─────────────────────────────────────────────
+
+	// order and grouping are flipped often enough that burying them in the settings panel
+	// would be wrong, so they get their own menu rather than a row of radio buttons
+	function openListMenu(anchor) {
+		closePopovers();
+		const settings = state.settings;
+		const popover = el('div', 'popover');
+
+		popover.appendChild(el('div', 'menu-label', 'Sort by'));
+		addChoice(popover, 'Last message', settings.sortBy !== 'created',
+			() => send({ type: 'setSetting', key: 'sortBy', value: 'activity' }));
+		addChoice(popover, 'Created', settings.sortBy === 'created',
+			() => send({ type: 'setSetting', key: 'sortBy', value: 'created' }));
+
+		popover.appendChild(el('div', 'sep'));
+		addChoice(popover, 'Group by category', settings.groupBy === 'category',
+			() => send({
+				type: 'setSetting',
+				key: 'groupBy',
+				value: settings.groupBy === 'category' ? 'none' : 'category'
+			}));
+
+		popover.appendChild(el('div', 'sep'));
+		addChoice(popover, 'Show archived', settings.showArchived,
+			() => send({ type: 'setSetting', key: 'showArchived', value: !settings.showArchived }));
+
+		placePopover(popover, anchor);
+	}
+
+	// ── categories panel ──────────────────────────────────────
+
+	function buildCategoriesPanel() {
+		const panel = el('div', 'panel');
+		panel.appendChild(el('h2', null, 'Categories'));
+
+		for (const category of state.categories) {
+			const row = el('div', 'cat-row');
+
+			const colour = document.createElement('input');
+			colour.type = 'color';
+			colour.value = category.colour;
+			colour.title = 'Colour';
+			// 'change' not 'input' — 'input' fires continuously while dragging the picker
+			colour.addEventListener('change', () => {
+				send({ type: 'updateCategory', id: category.id, colour: colour.value });
+			});
+
+			const name = document.createElement('input');
+			name.type = 'text';
+			name.value = category.name;
+			name.spellcheck = false;
+			const commitName = () => {
+				const next = name.value.trim();
+				if (next && next !== category.name) {
+					send({ type: 'updateCategory', id: category.id, name: next });
+				}
+			};
+			name.addEventListener('blur', commitName);
+			name.addEventListener('keydown', event => {
+				if (event.key === 'Enter') { name.blur(); }
+				if (event.key === 'Escape') { name.value = category.name; name.blur(); }
+			});
+
+			const remove = el('button', 'remove', '✕');
+			remove.title = 'Delete category';
+			remove.addEventListener('click', () => send({ type: 'deleteCategory', id: category.id }));
+
+			row.appendChild(colour);
+			row.appendChild(name);
+			row.appendChild(remove);
+			panel.appendChild(row);
+		}
+
+		const add = el('button', 'add', '+ Add category');
+		add.addEventListener('click', () => send({ type: 'createCategory' }));
+		panel.appendChild(add);
+
+		if (!state.categories.length) {
+			panel.appendChild(el('div', 'hint', 'Add a category, then use the ⋯ button on any session to assign it.'));
+		}
+		return panel;
+	}
+
+	// ── settings panel ────────────────────────────────────────
+
+	function buildSettingsPanel() {
+		const panel = el('div', 'panel');
+		panel.appendChild(buildLayoutSection());
+		return panel;
+	}
+
+	const OPEN_TARGETS = [
+		{ id: 'activeGroup', label: 'Active editor group', hint: 'Opens wherever you already are.' },
+		{ id: 'beside', label: 'Split to the side', hint: 'Splits right the first time, then reuses it.' },
+		{ id: 'dedicatedRight', label: 'Dedicated right column', hint: 'Keeps a full-height column on the right for every chat.' }
+	];
+
+	function numberField(labelText, suffix, value, min, max, key) {
+		const field = el('div', 'field');
+		field.appendChild(el('span', 'field-label', labelText));
+		const input = document.createElement('input');
+		input.type = 'number';
+		input.min = String(min);
+		input.max = String(max);
+		input.value = String(value);
+		const commit = () => {
+			const next = Math.min(max, Math.max(min, Number(input.value) || value));
+			input.value = String(next);
+			if (next !== value) { send({ type: 'setSetting', key: key, value: next }); }
+		};
+		input.addEventListener('blur', commit);
+		input.addEventListener('keydown', event => {
+			event.stopPropagation();
+			if (event.key === 'Enter') { input.blur(); }
+		});
+		field.appendChild(input);
+		field.appendChild(el('span', 'field-suffix', suffix));
+		return field;
+	}
+
+	function toggleField(labelText, value, key, hint) {
+		const field = el('div', 'field toggle');
+		const box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = Boolean(value);
+		box.id = 'toggle-' + key;
+		box.addEventListener('change', () => send({ type: 'setSetting', key: key, value: box.checked }));
+		const label = document.createElement('label');
+		label.htmlFor = box.id;
+		label.textContent = labelText;
+		field.appendChild(box);
+		field.appendChild(label);
+		const wrap = el('div', 'toggle-wrap');
+		wrap.appendChild(field);
+		if (hint) { wrap.appendChild(el('div', 'hint', hint)); }
+		return wrap;
+	}
+
+	function selectField(labelText, value, options, key) {
+		const field = el('div', 'field');
+		field.appendChild(el('span', 'field-label', labelText));
+		const select = document.createElement('select');
+		for (const option of options) {
+			const node = document.createElement('option');
+			node.value = option.value;
+			node.textContent = option.label;
+			if (option.value === value) { node.selected = true; }
+			select.appendChild(node);
+		}
+		// a model the setting names but the window no longer offers, so the picker still
+		// shows what is actually configured instead of silently reading as automatic
+		if (value && !options.some(option => option.value === value)) {
+			const node = document.createElement('option');
+			node.value = value;
+			node.textContent = value + ' (not available)';
+			node.selected = true;
+			select.appendChild(node);
+		}
+		select.addEventListener('change', () => send({ type: 'setSetting', key: key, value: select.value }));
+		field.appendChild(select);
+		return field;
+	}
+
+	function buildModelField() {
+		const models = state.models || [];
+		const options = [{ value: '', label: models.length ? 'Automatic (cheapest)' : 'Automatic' }];
+		for (const model of models) {
+			const vendor = model.vendor ? model.vendor + ' · ' : '';
+			options.push({ value: model.id, label: vendor + (model.name || model.family || model.id) });
+		}
+		const field = selectField('Model', state.settings.subtitleModel || '', options, 'subtitleModel');
+		if (!models.length) {
+			field.classList.add('empty');
+		}
+		return field;
+	}
+
+	function buildSubtitleSection() {
+		const settings = state.settings;
+		const section = el('div', 'section');
+		section.appendChild(el('h2', null, 'Subtitles'));
+		section.appendChild(el('div', 'sub-label', 'Default mode'));
+		radioRows(section, SUBTITLE_MODES, settings.subtitleMode,
+			id => send({ type: 'setSetting', key: 'subtitleMode', value: id }));
+		section.appendChild(toggleField(
+			'Generate when a session goes quiet',
+			settings.autoSubtitle,
+			'autoSubtitle',
+			'Every generation is a request against your chat provider. Sessions you have written a subtitle for yourself are left alone.'
+		));
+		if (settings.autoSubtitle) {
+			section.appendChild(numberField('Quiet for', 'sec', settings.subtitleIdleSeconds, 10, 3600, 'subtitleIdleSeconds'));
+		}
+		section.appendChild(buildModelField());
+		if (!(state.models || []).length) {
+			section.appendChild(el('div', 'hint',
+				'No language model is available in this window. Sign in to a chat provider, or add one under Chat: Manage Language Models.'));
+		}
+		section.appendChild(el('div', 'hint',
+			'Every row has its own buttons: a clock for recent status, lines for a task summary, and a refresh on the title.'));
+		return section;
+	}
+
+	const SUBTITLE_MODES = [
+		{ id: 'status', label: 'Recent status', hint: 'Where the session is now, from its most recent messages.' },
+		{ id: 'task', label: 'Task summary', hint: 'What it was asked to do, from its opening messages.' }
+	];
+
+	function radioRows(section, options, current, onPick) {
+		for (const option of options) {
+			const chosen = current === option.id;
+			const row = el('button', chosen ? 'opt-row chosen' : 'opt-row');
+			row.appendChild(el('span', 'radio', chosen ? '●' : '○'));
+			const text = el('span', 'opt-text');
+			text.appendChild(el('span', 'opt-label', option.label));
+			text.appendChild(el('span', 'opt-hint', option.hint));
+			row.appendChild(text);
+			row.addEventListener('click', () => onPick(option.id));
+			section.appendChild(row);
+		}
+	}
+
+	function buildLayoutSection() {
+		const settings = state.settings;
+		const section = el('div', 'section');
+		section.appendChild(el('h2', null, 'When a session is clicked'));
+		radioRows(section, OPEN_TARGETS, settings.openTarget, id => send({ type: 'setOpenTarget', target: id }));
+
+		// width only matters for the dedicated column, so it only appears with it
+		if (settings.openTarget === 'dedicatedRight') {
+			const width = el('div', 'field');
+			width.appendChild(el('span', 'field-label narrow', 'Width'));
+			const slider = document.createElement('input');
+			slider.type = 'range';
+			slider.min = '20';
+			slider.max = '80';
+			slider.step = '5';
+			slider.value = String(Math.round(settings.dedicatedColumnRatio * 100));
+			const readout = el('span', 'field-suffix', slider.value + '%');
+			slider.addEventListener('input', () => { readout.textContent = slider.value + '%'; });
+			// 'change' not 'input' — dragging would otherwise write on every pixel
+			slider.addEventListener('change', () => {
+				send({ type: 'setSetting', key: 'dedicatedColumnRatio', value: Number(slider.value) / 100 });
+			});
+			width.appendChild(slider);
+			width.appendChild(readout);
+			section.appendChild(width);
+			section.appendChild(el('div', 'hint', 'Applied when the column is first created. Resize it yourself afterwards and Chat Tags leaves it alone.'));
+		}
+
+		const activity = el('div', 'section');
+		activity.appendChild(el('h2', null, 'Activity'));
+		activity.appendChild(numberField('Bright while active for', 'sec', settings.activeSeconds, 5, 600, 'activeSeconds'));
+		activity.appendChild(numberField('Counts as recent for', 'min', settings.recentMinutes, 1, 1440, 'recentMinutes'));
+		section.appendChild(activity);
+		section.appendChild(buildSubtitleSection());
+
+		return section;
+	}
+
+	// ── rows ──────────────────────────────────────────────────
+
+	// one editor for both lines. writing either one by hand marks it 'manual', which is
+	// what makes the generate buttons ask before overwriting it
+	const FIELDS = {
+		title: {
+			selector: '.title, .line .row-input',
+			message: 'setTitle',
+			// clearing it is the reset — setTitle drops the override on an empty string
+			placeholder: session => session.titleOverridden
+				? 'Clear to restore the original title'
+				: 'Name this session',
+			current: session => session.title || ''
+		},
+		subtitle: {
+			selector: '.subtitle, .subtitle-line .row-input',
+			message: 'setSubtitle',
+			placeholder: () => 'e.g. Waiting for API key',
+			current: session => session.subtitle || ''
+		}
+	};
+
+	function startEdit(row, session, field) {
+		const spec = FIELDS[field];
+		editingSubtitleFor = session.sessionId;
+		const existing = row.querySelector(spec.selector);
+		if (!existing) { return; }
+		// the buttons beside it would otherwise sit on top of a full-width input
+		row.querySelectorAll('.row-actions').forEach(node => { node.style.display = 'none'; });
+
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.className = 'row-input ' + field + '-input';
+		input.value = spec.current(session);
+		input.placeholder = spec.placeholder(session);
+		input.spellcheck = false;
+
+		const commit = save => {
+			if (editingSubtitleFor !== session.sessionId) { return; }
+			editingSubtitleFor = null;
+			if (save) {
+				send({ type: spec.message, sessionId: session.sessionId, text: input.value });
+			} else {
+				render();
+			}
+		};
+		input.addEventListener('keydown', event => {
+			event.stopPropagation();
+			if (event.key === 'Enter') { commit(true); }
+			if (event.key === 'Escape') { commit(false); }
+		});
+		input.addEventListener('blur', () => commit(true));
+		input.addEventListener('click', event => event.stopPropagation());
+
+		existing.replaceWith(input);
+		input.focus();
+		input.select();
+	}
+
+	// a generate button over something the user wrote themselves arms on the first click
+	// and fires on the second. armed state lives here rather than in the session so a
+	// repaint from the file watcher doesn't silently disarm it mid-decision
+	let armed = null;
+	let armedTimer = null;
+
+	function disarm() {
+		if (armedTimer) { clearTimeout(armedTimer); armedTimer = null; }
+		if (armed) { armed = null; render(); }
+	}
+
+	function generateButton(session, mode, options) {
+		const key = session.sessionId + ':' + mode;
+		const isArmed = armed === key;
+		const guarded = options.guarded;
+		const classes = ['gen'];
+		if (guarded) { classes.push('guarded'); }
+		if (isArmed) { classes.push('armed'); }
+
+		const button = el('button', classes.join(' '));
+		button.appendChild(icon(options.iconName));
+		button.title = isArmed
+			? 'You have customised this ' + options.noun + ' already, confirm regenerate?'
+			: options.label;
+		button.setAttribute('aria-label', options.label + ' for ' + session.title);
+
+		button.addEventListener('click', event => {
+			event.stopPropagation();
+			if (guarded && !isArmed) {
+				armed = key;
+				if (armedTimer) { clearTimeout(armedTimer); }
+				// long enough to read the tooltip, short enough that it doesn't stay hot
+				armedTimer = setTimeout(disarm, 6000);
+				render();
+				return;
+			}
+			disarm();
+			send({ type: 'generateSubtitle', sessionId: session.sessionId, mode: mode });
+		});
+		return button;
+	}
+
+	function buildRow(session, now) {
+		const category = state.categories.find(c => c.id === session.categoryId);
+		const row = el('li', 'row');
+		row.tabIndex = 0;
+		row.dataset.sessionId = session.sessionId;
+		row.dataset.state = session.activity;
+		row.dataset.attention = String(Boolean(session.needsAttention));
+		if (session.archived) { row.classList.add('archived'); }
+		row.setAttribute('role', 'option');
+		row.setAttribute('aria-selected', String(session.sessionId === selectedId));
+
+		if (category) {
+			row.dataset.category = category.id;
+			row.style.setProperty('--row-colour', category.colour);
+			row.style.setProperty('--dot-colour', category.colour);
+		}
+		if (session.sessionId === selectedId) {
+			row.classList.add('selected');
+		}
+
+		// ── title row ─────────────────────────────────────────
+		const top = el('div', 'line');
+		top.appendChild(el('span', 'dot'));
+		const title = el('span', 'title', session.title);
+		if (session.needsAttention) {
+			title.title = 'New activity since you last opened this';
+		}
+		if (session.titleOverridden) {
+			// the native list still shows the session's own title — this one is only ours
+			title.dataset.overridden = 'true';
+			title.title = session.titleSource === 'manual'
+				? 'Your title. Double-click to edit.'
+				: 'Generated title. Double-click to edit.';
+		}
+		title.addEventListener('dblclick', event => {
+			event.stopPropagation();
+			startEdit(row, session, 'title');
+		});
+		top.appendChild(title);
+
+		const titleEdit = el('button', 'edit');
+		titleEdit.appendChild(icon('pencil'));
+		titleEdit.title = 'Edit title';
+		titleEdit.setAttribute('aria-label', 'Edit title for ' + session.title);
+		titleEdit.addEventListener('click', event => {
+			event.stopPropagation();
+			startEdit(row, session, 'title');
+		});
+		const titleActions = el('span', 'row-actions');
+		// an archived row is being put away, not worked on — restoring it is the only
+		// thing worth a button, and generating over it would be a billable request on
+		// something the user has already dismissed
+		if (session.archived) {
+			const restore = el('button', 'edit');
+			restore.appendChild(icon('unarchive'));
+			restore.title = 'Restore from archive';
+			restore.setAttribute('aria-label', 'Restore ' + session.title + ' from archive');
+			restore.addEventListener('click', event => {
+				event.stopPropagation();
+				send({ type: 'setArchived', sessionId: session.sessionId, archived: false });
+			});
+			titleActions.appendChild(restore);
+		} else {
+			titleActions.appendChild(titleEdit);
+			titleActions.appendChild(generateButton(session, 'title', {
+				iconName: 'refresh',
+				label: 'Regenerate title',
+				noun: 'title',
+				guarded: session.titleSource === 'manual'
+			}));
+		}
+
+		const menuButton = el('button', 'actions');
+		menuButton.appendChild(icon('dots'));
+		menuButton.title = 'Category';
+		menuButton.setAttribute('aria-label', 'Category for ' + session.title);
+		menuButton.addEventListener('click', event => {
+			event.stopPropagation();
+			openPopover(menuButton, session);
+		});
+		titleActions.appendChild(menuButton);
+		if (armed === session.sessionId + ':title') {
+			titleActions.classList.add('has-armed');
+		}
+		top.appendChild(titleActions);
+
+		// ── subtitle row ──────────────────────────────────────
+		const hasSubtitle = Boolean(session.subtitle);
+		const subtitleText = session.generating
+			? 'Generating…'
+			: hasSubtitle
+				? session.subtitle
+				: session.requestCount + (session.requestCount === 1 ? ' request' : ' requests')
+					+ ' · ' + relativeTime(session.lastActivityAt, now);
+
+		const subtitleLine = el('div', 'subtitle-line');
+		const subtitle = el('span',
+			session.generating ? 'subtitle generating' : hasSubtitle ? 'subtitle' : 'subtitle placeholder',
+			subtitleText);
+		if (hasSubtitle && session.subtitleSource === 'llm') {
+			subtitle.title = 'Generated. Edit it and it stops being regenerated.';
+		}
+
+		const editButton = el('button', 'edit');
+		editButton.appendChild(icon('pencil'));
+		editButton.title = 'Edit subtitle';
+		editButton.setAttribute('aria-label', 'Edit subtitle for ' + session.title);
+		editButton.addEventListener('click', event => {
+			event.stopPropagation();
+			startEdit(row, session, 'subtitle');
+		});
+
+		const guardSubtitle = session.subtitleSource === 'manual';
+		const subtitleActions = el('span', 'row-actions');
+		if (!session.archived) {
+			subtitleActions.appendChild(editButton);
+			subtitleActions.appendChild(generateButton(session, 'status', {
+				iconName: 'clock',
+				label: 'Subtitle from recent status',
+				noun: 'subtitle',
+				guarded: guardSubtitle
+			}));
+			subtitleActions.appendChild(generateButton(session, 'task', {
+				iconName: 'notes',
+				label: 'Subtitle from task summary',
+				noun: 'subtitle',
+				guarded: guardSubtitle
+			}));
+		}
+		if (armed === session.sessionId + ':status' || armed === session.sessionId + ':task') {
+			subtitleActions.classList.add('has-armed');
+		}
+		subtitleLine.appendChild(subtitle);
+		subtitleLine.appendChild(subtitleActions);
+
+		row.appendChild(top);
+		row.appendChild(subtitleLine);
+
+		row.addEventListener('click', () => open(session.sessionId));
+		row.addEventListener('contextmenu', event => {
+			event.preventDefault();
+			openPopover(menuButton, session);
+		});
+		return row;
+	}
+
+	function open(sessionId) {
+		selectedId = sessionId;
+		send({ type: 'open', sessionId });
+	}
+
+	function focusOffset(delta) {
+		const rows = Array.from(document.querySelectorAll('.row'));
+		if (!rows.length) { return; }
+		const current = rows.findIndex(row => row === document.activeElement);
+		const next = Math.min(rows.length - 1, Math.max(0, (current === -1 ? 0 : current + delta)));
+		rows[next].focus();
+	}
+
+	// grouping is only ever by category, so the order is the order the categories were
+	// defined in and everything without one falls to the bottom
+	function groupSessions(sessions) {
+		if (state.settings.groupBy !== 'category') {
+			return [{ category: null, label: null, sessions: sessions }];
+		}
+		const groups = [];
+		for (const category of state.categories) {
+			const members = sessions.filter(session => session.categoryId === category.id);
+			if (members.length) {
+				groups.push({ category: category, label: category.name, sessions: members });
+			}
+		}
+		// a session pointing at a category that has since been deleted belongs here too
+		const known = new Set(state.categories.map(category => category.id));
+		const loose = sessions.filter(session => !known.has(session.categoryId));
+		if (loose.length) {
+			groups.push({ category: null, label: 'Uncategorised', sessions: loose });
+		}
+		return groups;
+	}
+
+	function sectionHeader(label, count, colour) {
+		const header = el('li', 'group');
+		// a heading inside a listbox is furniture, not an option
+		header.setAttribute('role', 'presentation');
+		const swatch = el('span', 'swatch');
+		if (colour) { swatch.style.setProperty('--swatch', colour); }
+		header.appendChild(swatch);
+		header.appendChild(el('span', 'group-name', label));
+		header.appendChild(el('span', 'group-count', String(count)));
+		return header;
+	}
+
+	function render() {
+		const now = Date.now();
+		closePopovers();
+		root.textContent = '';
+
+		const live = state.sessions.filter(session => !session.archived);
+		const archived = state.sessions.filter(session => session.archived);
+		// archived rows are out of sight by definition, so they don't get to ask for you
+		const unread = live.filter(session => session.needsAttention).length;
+
+		const toolbar = el('div', 'toolbar');
+		const categories = el('button', openPanel === 'categories' ? 'active' : null, 'Categories');
+		categories.title = openPanel === 'categories' ? 'Close categories' : 'Categories';
+		categories.setAttribute('aria-pressed', String(openPanel === 'categories'));
+		categories.addEventListener('click', () => togglePanel('categories'));
+		toolbar.appendChild(categories);
+
+		if (unread) {
+			const markRead = el('button', null, '✓ Mark all read');
+			markRead.addEventListener('click', () => send({ type: 'markAllRead' }));
+			toolbar.appendChild(markRead);
+		}
+
+		toolbar.appendChild(el('div', 'spacer'));
+		toolbar.appendChild(el('span', 'count',
+			unread ? unread + ' new · ' + live.length : String(live.length)));
+
+		const sort = el('button', 'icon');
+		sort.appendChild(icon('sort', 15));
+		sort.title = 'Sort, group and archived';
+		sort.setAttribute('aria-label', 'Sort, group and archived');
+		sort.addEventListener('click', event => {
+			event.stopPropagation();
+			openListMenu(sort);
+		});
+		toolbar.appendChild(sort);
+
+		const gear = el('button', openPanel === 'settings' ? 'icon active' : 'icon');
+		gear.appendChild(icon('gear', 15));
+		gear.title = openPanel === 'settings' ? 'Close settings' : 'Settings';
+		gear.setAttribute('aria-label', 'Settings');
+		gear.setAttribute('aria-pressed', String(openPanel === 'settings'));
+		gear.addEventListener('click', () => togglePanel('settings'));
+		toolbar.appendChild(gear);
+
+		const extensions = el('button', 'icon');
+		const logo = document.createElement('img');
+		logo.className = 'logo';
+		logo.src = document.body.dataset.logo || '';
+		logo.alt = '';
+		extensions.appendChild(logo);
+		extensions.title = 'View in Extensions';
+		extensions.setAttribute('aria-label', 'View in Extensions');
+		extensions.addEventListener('click', () => send({ type: 'openInExtensions' }));
+		toolbar.appendChild(extensions);
+
+		root.appendChild(toolbar);
+
+		if (openPanel === 'categories') {
+			root.appendChild(buildCategoriesPanel());
+		} else if (openPanel === 'settings') {
+			root.appendChild(buildSettingsPanel());
+		}
+
+		if (!state.sessions.length) {
+			root.appendChild(el('div', 'empty', state.archivedCount
+				? 'Everything here is archived. Show it again from the sort menu.'
+				: 'No chat sessions found for this window. Open a folder that has chat history, or start a chat.'));
+			return;
+		}
+
+		const list = el('ul', 'list');
+		list.setAttribute('role', 'listbox');
+		list.setAttribute('aria-label', 'Chat sessions');
+
+		for (const group of groupSessions(live)) {
+			if (group.label) {
+				list.appendChild(sectionHeader(group.label, group.sessions.length,
+					group.category ? group.category.colour : null));
+			}
+			for (const session of group.sessions) {
+				list.appendChild(buildRow(session, now));
+			}
+		}
+
+		// archived stays one block at the bottom whether or not the rest is grouped —
+		// scattering it back through the categories would defeat the point of archiving
+		if (archived.length) {
+			list.appendChild(sectionHeader('Archived', archived.length));
+			for (const session of archived) {
+				list.appendChild(buildRow(session, now));
+			}
+		}
+		root.appendChild(list);
+
+		// hidden archived sessions are otherwise invisible, and a count nobody can find is
+		// how you end up thinking a chat was deleted
+		if (!state.settings.showArchived && state.archivedCount) {
+			const footer = el('button', 'footer',
+				state.archivedCount + (state.archivedCount === 1 ? ' archived session' : ' archived sessions'));
+			footer.title = 'Show archived';
+			footer.addEventListener('click', () => send({ type: 'setSetting', key: 'showArchived', value: true }));
+			root.appendChild(footer);
+		}
+	}
+
+	document.addEventListener('click', closePopovers);
+
+	document.addEventListener('keydown', event => {
+		if (event.key === 'Escape') { closePopovers(); return; }
+		if (editingSubtitleFor) { return; }
+		if (event.key === 'ArrowDown') { event.preventDefault(); focusOffset(1); }
+		else if (event.key === 'ArrowUp') { event.preventDefault(); focusOffset(-1); }
+		else if (event.key === 'Enter' || event.key === ' ') {
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.dataset.sessionId) {
+				event.preventDefault();
+				open(active.dataset.sessionId);
+			}
+		}
+	});
+
+	window.addEventListener('message', event => {
+		const message = event.data;
+		if (message && message.type === 'openPanel') {
+			openPanel = message.panel;
+			render();
+			return;
+		}
+		if (message && message.type === 'render') {
+			state = {
+				sessions: message.sessions,
+				categories: message.categories,
+				models: message.models || [],
+				archivedCount: message.archivedCount || 0,
+				settings: Object.assign({}, DEFAULT_SETTINGS, message.settings)
+			};
+			// a redraw mid-edit would throw away what's being typed
+			if (!editingSubtitleFor) { render(); }
+		}
+	});
+
+	render();
+	send({ type: 'ready' });
+}());
+
+
+	document.getElementById = realGet;
+	window.addEventListener = realAdd;
+	Date.now = () => NOW;
+
+	const settings = Object.assign({
+		openTarget: 'dedicatedRight', dedicatedColumnRatio: 0.4, activeSeconds: 45,
+		recentMinutes: 10, autoSubtitle: true, subtitleIdleSeconds: 120,
+		subtitleMode: 'status', subtitleModel: ''
+	}, pane.settings);
+
+	// the provider sorts before posting; mirrors compareSessions() in core/sessions.ts
+	const compare = settings.sortBy === 'created'
+		? (a, b) => (b.createdAt || b.lastActivityAt) - (a.createdAt || a.lastActivityAt)
+		: (a, b) => b.lastActivityAt - a.lastActivityAt;
+	const visible = (settings.showArchived ? SESSIONS : SESSIONS.filter(s => !s.archived))
+		.slice().sort(compare);
+
+	const post = message => listeners.forEach(fn => fn({ data: message }));
+	post({
+		type: 'render',
+		sessions: visible,
+		categories: CATEGORIES,
+		archivedCount: SESSIONS.filter(s => s.archived).length,
+		settings: settings,
+		models: MODELS
+	});
+	if (pane.panel) { post({ type: 'openPanel', panel: pane.panel }); }
+	return host;
+}
+
+// :hover can't be forced from script, so the hovered row borrows the same rules
+const forced = document.createElement('style');
+forced.textContent =
+	'.row.shot-hover{background:var(--vscode-list-hoverBackground)}' +
+	'.row.shot-hover[data-category]{background:color-mix(in srgb,var(--row-colour) var(--wash-hover),var(--vscode-list-hoverBackground))}' +
+	'.row.shot-hover .row-actions{width:auto;opacity:1}' +
+	'.row.shot-hover .edit,.row.shot-hover .gen,.row.shot-hover .actions{opacity:0.75}' +
+	'.row.shot-hover .gen.guarded{opacity:0.35}';
+document.head.appendChild(forced);
+
+// every pane runs its own copy of view.js, but closePopovers() and the document click
+// listener are global — so an open menu gets torn down by the next pane that mounts.
+// each one is lifted out as a static clone and put back once nothing is left to run.
+const menus = [];
+
+for (const pane of PANES) {
+	const host = mount(pane);
+	const rows = host.querySelectorAll('.row');
+
+	if (typeof pane.hoverRow === 'number' && rows[pane.hoverRow]) {
+		rows[pane.hoverRow].classList.add('shot-hover');
+	}
+
+	let anchor = null;
+	if (pane.menu === 'sort') {
+		anchor = host.querySelector('.toolbar button[aria-label="Sort, group and archived"]');
+	} else if (pane.menu === 'row' && rows[pane.hoverRow ?? 0]) {
+		anchor = rows[pane.hoverRow ?? 0].querySelector('.actions');
+	}
+	if (!anchor) { continue; }
+
+	anchor.click();
+	const popover = document.querySelector('.popover');
+	if (!popover) { continue; }
+	const clone = popover.cloneNode(true);
+	clone.classList.add('shot-' + pane.theme);
+	menus.push({ node: clone, anchor: anchor, pane: host.closest('.pane') });
+	popover.remove();
+}
+
+for (const menu of menus) {
+	document.body.appendChild(menu.node);
+	const anchor = menu.anchor.getBoundingClientRect();
+	const pane = menu.pane.getBoundingClientRect();
+	// the real popover clamps to the webview width; here the pane is the webview
+	const left = Math.max(pane.left + 4, Math.min(anchor.left, pane.right - menu.node.offsetWidth - 6));
+	menu.node.style.top = (anchor.bottom + window.scrollY + 2) + 'px';
+	menu.node.style.left = (left + window.scrollX) + 'px';
+}
+
+document.documentElement.dataset.ready = 'true';
+</script>
+</body>
+</html>

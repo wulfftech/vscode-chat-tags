@@ -1,0 +1,18 @@
+.vscode/**
+src/**
+scripts/**
+out/**/*.map
+node_modules/**
+tsconfig.json
+package-lock.json
+*.vsix
+dev/**
+# design sources and the uncropped master stay out of the package
+chat-tags.png
+chat-tags.pdn
+.gitignore
+media/logo.png
+# vsce rewrites readme image links to the repo, so the shot ships from github
+media/screenshot.png
+# dev docs — the marketplace listing is README.md alone
+CONTRIBUTING.md

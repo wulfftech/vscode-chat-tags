@@ -1,0 +1,393 @@
+import * as fs from 'fs';
+import * as vscode from 'vscode';
+import { ChatSessionInfo, activityStateOf, compareSessions, listSessions } from '../core/sessions';
+import { PALETTE, TagStore } from '../model/categories';
+import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
+import { deleteSession, openSession } from '../navigation';
+import { GenerationMode } from '../core/subtitleText';
+import { SubtitleService } from '../subtitles';
+
+// activity is time-based, so the view has to repaint even when nothing on disk moved
+const REPAINT_INTERVAL_MS = 20_000;
+
+interface RenderedSession {
+	sessionId: string;
+	title: string;
+	// true when the title shown is ours rather than the one in the session file
+	titleOverridden: boolean;
+	titleSource?: 'manual' | 'llm';
+	subtitle?: string;
+	subtitleSource?: 'manual' | 'llm';
+	requestCount: number;
+	lastActivityAt: number;
+	createdAt: number;
+	activity: string;
+	categoryId?: string;
+	needsAttention: boolean;
+	generating: boolean;
+	archived: boolean;
+}
+
+function nonce(): string {
+	let text = '';
+	const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+	for (let i = 0; i < 32; i++) {
+		text += chars.charAt(Math.floor(Math.random() * chars.length));
+	}
+	return text;
+}
+
+export class SessionsViewProvider implements vscode.WebviewViewProvider {
+	public static readonly viewType = 'chatTags.sessions';
+
+	private view?: vscode.WebviewView;
+	private sessions: ChatSessionInfo[] = [];
+	private timer?: NodeJS.Timeout;
+
+	constructor(
+		private readonly extensionUri: vscode.Uri,
+		private readonly directories: string[],
+		private readonly tags: TagStore,
+		private readonly subtitles: SubtitleService,
+		private readonly log: vscode.OutputChannel
+	) {
+		this.tags.onDidChange(() => this.post());
+		this.subtitles.onDidChange(() => this.post());
+	}
+
+	async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
+		this.view = view;
+		view.webview.options = {
+			enableScripts: true,
+			localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')]
+		};
+		view.webview.html = this.html(view.webview);
+		view.webview.onDidReceiveMessage(message => this.handle(message));
+
+		view.onDidDispose(() => {
+			if (this.timer) {
+				clearInterval(this.timer);
+				this.timer = undefined;
+			}
+			this.view = undefined;
+		});
+
+		this.timer = setInterval(() => this.post(), REPAINT_INTERVAL_MS);
+		await this.refresh();
+	}
+
+	async refresh(): Promise<void> {
+		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir)));
+		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+		this.post();
+	}
+
+	/** Opens the in-pane categories panel. */
+	openCategories(): void {
+		void this.view?.webview.postMessage({ type: 'openPanel', panel: 'categories' });
+		this.view?.show?.(true);
+	}
+
+	private post(): void {
+		if (!this.view) {
+			return;
+		}
+		const now = Date.now();
+		const thresholds = readActivityThresholds();
+		const preferences = readPreferences();
+		const subtitles = readSubtitlePreferences();
+		const list = readListPreferences();
+		const inFlight = new Set(this.subtitles.inFlight);
+		const all: RenderedSession[] = this.sessions.map(session => {
+			const meta = this.tags.meta(session.sessionId);
+			return {
+				sessionId: session.sessionId,
+				title: meta.title ?? session.title,
+				titleOverridden: Boolean(meta.title),
+				titleSource: meta.titleSource,
+				subtitle: meta.subtitle,
+				subtitleSource: meta.subtitleSource,
+				requestCount: session.requestCount,
+				lastActivityAt: session.lastActivityAt,
+				createdAt: session.createdAt,
+				activity: activityStateOf(session, now, thresholds),
+				categoryId: meta.categoryId,
+				needsAttention: this.tags.needsAttention(session.sessionId, session.lastActivityAt),
+				generating: inFlight.has(session.sessionId),
+				archived: Boolean(meta.archivedAt)
+			};
+		});
+
+		const archivedCount = all.filter(session => session.archived).length;
+		const rendered = (list.showArchived ? all : all.filter(session => !session.archived))
+			.sort(compareSessions(list.sortBy));
+
+		void this.view.webview.postMessage({
+			type: 'render',
+			sessions: rendered,
+			categories: this.tags.categories,
+			archivedCount,
+			settings: {
+				openTarget: preferences.target,
+				dedicatedColumnRatio: preferences.ratio,
+				activeSeconds: Math.round(thresholds.activeMs / 1000),
+				recentMinutes: Math.round(thresholds.recentMs / 60_000),
+				autoSubtitle: subtitles.auto,
+				subtitleIdleSeconds: Math.round(subtitles.idleMs / 1000),
+				subtitleMode: subtitles.mode,
+				subtitleModel: subtitles.model,
+				sortBy: list.sortBy,
+				groupBy: list.groupBy,
+				showArchived: list.showArchived
+			},
+			models: this.subtitles.availableModels
+		});
+
+		// queueing fires onDidChange, which reposts — so this runs last, or the row that
+		// just got queued would paint without its spinner until the next repaint.
+		// archived sessions are out of sight, so they don't get billable generations
+		this.subtitles.considerAuto(this.sessions
+			.filter(session => !this.tags.meta(session.sessionId).archivedAt)
+			.map(session => ({
+				sessionId: session.sessionId,
+				title: session.title,
+				filePath: session.filePath,
+				lastActivityAt: session.lastActivityAt
+			})));
+	}
+
+	private generate(sessionId: string, mode?: GenerationMode): void {
+		const session = this.sessions.find(entry => entry.sessionId === sessionId);
+		if (!session) {
+			return;
+		}
+		this.subtitles.request({
+			sessionId: session.sessionId,
+			// feed the model whatever is on screen, override included — a regenerated title
+			// should be judged against the one it is replacing
+			title: this.tags.meta(session.sessionId).title ?? session.title,
+			filePath: session.filePath,
+			lastActivityAt: session.lastActivityAt
+		}, true, mode ?? readSubtitlePreferences().mode);
+	}
+
+	/** Opens the in-pane settings panel. */
+	openSettingsPanel(): void {
+		void this.view?.webview.postMessage({ type: 'openPanel', panel: 'settings' });
+		this.view?.show?.(true);
+	}
+
+	// a palette entry has no row to act on, so it asks which session
+	private async pickSession(placeHolder: string): Promise<string | undefined> {
+		if (!this.sessions.length) {
+			await this.refresh();
+		}
+		const picked = await vscode.window.showQuickPick(
+			this.sessions.map(session => {
+				const meta = this.tags.meta(session.sessionId);
+				return {
+					label: meta.title ?? session.title,
+					description: meta.archivedAt ? 'archived' : meta.subtitle,
+					sessionId: session.sessionId
+				};
+			}),
+			{ placeHolder, matchOnDescription: true }
+		);
+		return picked?.sessionId;
+	}
+
+	async generateViaPicker(mode: GenerationMode): Promise<void> {
+		const sessionId = await this.pickSession(mode === 'title'
+			? 'Regenerate the title of which session?'
+			: 'Generate a subtitle for which session?');
+		if (sessionId) {
+			this.generate(sessionId, mode);
+		}
+	}
+
+	// one entry for both directions — picking an archived session restores it
+	async archiveViaPicker(): Promise<void> {
+		const sessionId = await this.pickSession('Archive or restore which session?');
+		if (sessionId) {
+			await this.tags.setArchived(sessionId, !this.tags.meta(sessionId).archivedAt);
+		}
+	}
+
+	async deleteViaPicker(): Promise<void> {
+		const sessionId = await this.pickSession('Delete which session? This cannot be undone.');
+		if (sessionId) {
+			await this.delete(sessionId);
+		}
+	}
+
+	private async handle(message: any): Promise<void> {
+		switch (message?.type) {
+			case 'ready':
+				this.post();
+				return;
+			case 'refresh':
+				await this.refresh();
+				return;
+			case 'open':
+				await this.open(message.sessionId);
+				return;
+			case 'setCategory':
+				await this.tags.setCategory(message.sessionId, message.categoryId ?? undefined);
+				return;
+			case 'setArchived':
+				await this.tags.setArchived(message.sessionId, Boolean(message.archived));
+				return;
+			case 'deleteSession':
+				await this.delete(message.sessionId);
+				return;
+			case 'setSubtitle':
+				await this.tags.setSubtitle(message.sessionId, message.text, 'manual');
+				return;
+			case 'generateSubtitle':
+				this.generate(message.sessionId, message.mode);
+				return;
+			case 'setTitle':
+				await this.tags.setTitle(message.sessionId, message.text, 'manual');
+				return;
+			case 'openInExtensions':
+				await openInExtensions();
+				return;
+			case 'createCategory':
+				await this.tags.createCategory('New category', this.nextColour());
+				return;
+			case 'updateCategory':
+				await this.tags.updateCategory(message.id, {
+					...(message.name !== undefined ? { name: message.name } : {}),
+					...(message.colour !== undefined ? { colour: message.colour } : {})
+				});
+				return;
+			case 'deleteCategory':
+				await this.confirmDelete(message.id);
+				return;
+			case 'setOpenTarget':
+				await writeTarget(message.target as OpenTarget);
+				this.post();
+				return;
+			case 'setSetting':
+				await writeSetting(message.key, message.value);
+				this.post();
+				return;
+			case 'markAllRead':
+				await this.tags.markAllSeen(this.sessions.map(session => session.sessionId));
+				return;
+		}
+	}
+
+	// cycle the palette so a new category never lands on the colour just used
+	private nextColour(): string {
+		const used = new Set(this.tags.categories.map(category => category.colour.toLowerCase()));
+		const free = PALETTE.find(entry => !used.has(entry.colour.toLowerCase()));
+		return (free ?? PALETTE[this.tags.categories.length % PALETTE.length]!).colour;
+	}
+
+	private async confirmDelete(id: string): Promise<void> {
+		const category = this.tags.category(id);
+		if (!category) {
+			return;
+		}
+		const confirm = await vscode.window.showWarningMessage(
+			`Delete category "${category.name}"? Sessions using it keep their subtitles but lose the colour.`,
+			{ modal: true },
+			'Delete'
+		);
+		if (confirm === 'Delete') {
+			await this.tags.deleteCategory(id);
+		}
+	}
+
+	// vs code runs its own confirmation dialog, names the session and warns that it can't
+	// be undone, so there is nothing worth asking here first
+	private async delete(sessionId: string): Promise<void> {
+		const session = this.sessions.find(entry => entry.sessionId === sessionId);
+		try {
+			await deleteSession(sessionId);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.log.appendLine(`[delete] ${sessionId} failed: ${message}`);
+			const choice = await vscode.window.showWarningMessage(
+				'Chat Tags could not delete that session. The workbench command may have changed in this VS Code version.',
+				'Show Log'
+			);
+			if (choice === 'Show Log') {
+				this.log.show(true);
+			}
+			return;
+		}
+
+		// the command resolves whether the user confirmed or cancelled, so the file is the
+		// only evidence of what happened
+		const gone = session ? !fs.existsSync(session.filePath) : true;
+		this.log.appendLine(`[delete] ${sessionId} ${gone ? 'removed' : 'still on disk — cancelled, or absent from this session index'}`);
+		if (gone) {
+			await this.tags.forget(sessionId);
+		}
+		await this.refresh();
+	}
+
+	private async open(sessionId: string): Promise<void> {
+		// opening is what clears the attention state — that's the whole contract of the
+		// left border, so mark first and let the result post the repaint
+		await this.tags.markSeen(sessionId);
+
+		// arrange the window first — the open path targets whichever group is active
+		await prepareForOpen(readPreferences());
+
+		const result = await openSession(sessionId);
+		this.log.appendLine(`[open] ${sessionId} -> ${result.succeeded ?? 'ALL RUNGS FAILED'}`);
+		if (!result.succeeded) {
+			const choice = await vscode.window.showWarningMessage(
+				'Chat Tags could not open that session. The workbench command may have changed in this VS Code version.',
+				'Show Log'
+			);
+			if (choice === 'Show Log') {
+				this.log.show(true);
+			}
+		}
+	}
+
+	private html(webview: vscode.Webview): string {
+		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'view.css'));
+		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'view.js'));
+		const logoUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.png'));
+		const id = nonce();
+
+		return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; img-src ${webview.cspSource}; script-src 'nonce-${id}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link href="${styleUri}" rel="stylesheet">
+<title>Chat Tags</title>
+</head>
+<body data-logo="${logoUri}">
+<div id="root"></div>
+<script nonce="${id}" src="${scriptUri}"></script>
+</body>
+</html>`;
+	}
+
+	dispose(): void {
+		if (this.timer) {
+			clearInterval(this.timer);
+		}
+	}
+}
+
+// both commands exist in the 1.134.0 workbench bundle. extension.open takes
+// [id, tab, preserveFocus] and lands on the detail page; the search fallback only opens
+// the view with a query, which is still better than nothing
+const EXTENSION_ID = 'wulfftech.chat-tags';
+
+async function openInExtensions(): Promise<void> {
+	try {
+		await vscode.commands.executeCommand('extension.open', EXTENSION_ID);
+	} catch {
+		await vscode.commands.executeCommand('workbench.extensions.search', `@id:${EXTENSION_ID}`);
+	}
+}
