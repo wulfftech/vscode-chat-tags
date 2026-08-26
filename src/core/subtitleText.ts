@@ -4,6 +4,10 @@ import { LastExchange } from './sessionContent';
 // read the opening messages — a task summary and a title are both about the original aim
 export type GenerationMode = 'status' | 'task' | 'title';
 
+// which of those two a stored subtitle came from, so an automatic sweep can regenerate
+// it the way it was originally asked for rather than however the setting reads today
+export type SubtitleMode = Extract<GenerationMode, 'status' | 'task'>;
+
 // prompt building and answer cleanup, kept free of vscode so the probe can exercise them
 // without an extension host — the model call is the only part that needs one
 
@@ -11,6 +15,29 @@ export type GenerationMode = 'status' | 'task' | 'title';
 export const MAX_SUBTITLE_CHARS = 48;
 // the title line is bigger and has the row to itself
 export const MAX_TITLE_CHARS = 60;
+
+// ── redaction ────────────────────────────────────────────────────────────────
+// running the tools is consented to; a prompt is different, because it hands whatever
+// the tools touched to a third-party model provider verbatim. one real session held a
+// live vault session token in its tool activity and a password in its last request, so
+// the shapes that are unambiguously credentials get masked on the way into a prompt.
+// deliberately small — this is not a scanner, it is a stop on the obvious cases
+const SECRETS: ReadonlyArray<RegExp> = [
+	// an assignment whose name says what it holds, quoted or bare, as tool activity logs it
+	/\b[A-Za-z_][A-Za-z0-9_]*(?:SESSION|TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|KEY|CREDENTIAL)\s*=\s*['"]?[^\s'";|&]+/gi,
+	// said out loud, which is how a password usually reaches a chat in the first place
+	/\b(?:password|passwd|passphrase|pw)\s*(?:is|are|=|:)\s*\S+/gi,
+	// vendor-prefixed keys identify themselves, so they need no surrounding context
+	/\b(?:sk-|ghp_|gho_|ghs_|ghu_|github_pat_|xox[abprs]-|AKIA)[A-Za-z0-9_-]{8,}/g,
+	/\bBearer\s+[A-Za-z0-9._-]{16,}/gi,
+	/-----BEGIN[^-]*PRIVATE KEY-----/g
+];
+
+// applied to the finished prompt rather than field by field, so a new field can't be
+// added later that quietly bypasses it
+export function redact(text: string): string {
+	return SECRETS.reduce((current, pattern) => current.replace(pattern, '[redacted]'), text);
+}
 
 export function buildStatusPrompt(title: string, exchange: LastExchange): string {
 	const lines = [
@@ -20,10 +47,11 @@ export function buildStatusPrompt(title: string, exchange: LastExchange): string
 		'- two to five words, 48 characters maximum',
 		'- describe the current state, not the topic — the title already carries the topic',
 		'- say what it is waiting on, blocked by, or has just finished',
+		'- when the work is finished, say so and name what comes next',
 		'- no quotes, no markdown, no trailing full stop',
 		'- reply with the line and nothing else',
 		'',
-		'Examples: Waiting for API key / Tests failing on CI / Retrying after request errors / Refactor applied, unverified',
+		'Examples: Waiting for API key / Tests failing on CI / Committed, awaiting deploy / Retrying after request errors / Refactor applied, unverified',
 		'',
 		`Session title: ${title}`
 	];
@@ -40,7 +68,7 @@ export function buildStatusPrompt(title: string, exchange: LastExchange): string
 	if (exchange.pendingConfirmation) {
 		lines.push(`Parked on a confirmation: ${exchange.pendingConfirmation}`);
 	}
-	return lines.join('\n');
+	return redact(lines.join('\n'));
 }
 
 // models answer in quotes, in bold, as a bullet, or with a sentence of preamble
@@ -74,7 +102,7 @@ function numbered(messages: string[]): string {
 }
 
 export function buildTaskPrompt(title: string, messages: string[]): string {
-	return [
+	return redact([
 		'Below are the opening messages of a coding chat. Write ONE short line saying what the person asked for.',
 		'',
 		'Rules:',
@@ -90,11 +118,11 @@ export function buildTaskPrompt(title: string, messages: string[]): string {
 		'',
 		'Opening messages:',
 		numbered(messages)
-	].join('\n');
+	].join('\n'));
 }
 
 export function buildTitlePrompt(title: string, messages: string[]): string {
-	return [
+	return redact([
 		'Below are the opening messages of a coding chat. Write ONE title for it.',
 		'',
 		'Rules:',
@@ -110,7 +138,7 @@ export function buildTitlePrompt(title: string, messages: string[]): string {
 		'',
 		'Opening messages:',
 		numbered(messages)
-	].join('\n');
+	].join('\n'));
 }
 
 // same cleanup, longer ceiling — a title gets the whole row

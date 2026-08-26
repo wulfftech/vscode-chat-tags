@@ -101,7 +101,9 @@ What comes back is a status line, not an essay. "Waiting for API key." "Retrying
 
 Status decays. It's right for something you're still working. Task summary doesn't decay, so it's right for something you'll come back to in a week and stare at blankly.
 
-Every message the model sees goes through a boilerplate filter first, so `@agent Try Again` and terminal notifications never count towards the five. They're not intent. They're noise wearing a request's clothes.
+Every message the model sees goes through a boilerplate filter first, so `@agent Try Again`, terminal notifications and bare acknowledgements — `cool`, `thanks`, `omg yes do it` — never count towards the five. They're not intent. They're noise wearing a request's clothes.
+
+When the end of a session is nothing but noise, the prompt carries no last request at all. A missing line is a better prompt than a misleading one: `Last request: cool` tells a model the topic is the only thing worth mentioning, which is exactly how a status line comes back reading like a title.
 
 ### Overwriting something you wrote
 
@@ -142,6 +144,28 @@ Off by default. Every generation is a real billable request against whatever pro
 The scope rule is the one doing the heavy lifting. Without it, flicking `chatTags.autoSubtitle` on would backfill every session on your disk in one enthusiastic go, and you'd find out when the bill arrived.
 
 Manual always wins. Edit a generated subtitle and it becomes yours — `subtitleSource` flips to `manual` and the automatic sweep leaves it alone forever after.
+
+A subtitle also remembers which kind it is. Generate a status line and it stays a status line, even where `chatTags.subtitleMode` says `task` — without that the next sweep rewrites your state line back into a task line and there is nothing on screen to explain why.
+
+### What leaves your machine
+
+A prompt is not the same as a tool call. Running the command is what you asked for; handing what it touched to a model provider is a second thing, and session files are full of material that was never meant to travel.
+
+One real session had a live Vaultwarden session token sitting in its tool activity and a password as its last request. Both would have gone out verbatim.
+
+So credentials are masked on the way in:
+
+| Masked | |
+|---|---|
+| `NAME=value` | where the name ends in `SESSION`, `TOKEN`, `SECRET`, `PASSWORD`, `KEY`, `CREDENTIAL` |
+| Spoken passwords | `pw is …`, `password: …` |
+| Vendor-prefixed keys | `sk-`, `ghp_`, `xox…-`, `AKIA` and friends |
+| Bearer tokens | |
+| Private key blocks | |
+
+Deliberately small — a stop on the obvious shapes rather than a scanner, running on the finished prompt so nothing added later slips past it. What it catches becomes `[redacted]`.
+
+This is not a claim that nothing else can leak. Prose you typed is sent as prose you typed. If a session is full of things you would not paste into someone else's window, leave `chatTags.autoSubtitle` off for it.
 
 ## Where sessions open
 

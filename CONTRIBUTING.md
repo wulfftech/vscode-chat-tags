@@ -105,11 +105,19 @@ Measured across 23 real sessions, 97 MB:
 |---|---|
 | Scan time | 61 ms for all 23 |
 | Slowest single session | 16 ms for 48 MB |
-| User message recovered | 22 of 23 |
+| User message recovered | 16 of 23 |
 | Assistant prose recovered | 12 of 23 |
 | Failures | 0 |
 
-Two things had to be thrown out. `@agent Try Again` writes a real request record carrying no intent whatsoever, and it was the newest request in eight of those 23 sessions — the reader walks back up to ten records looking for something a person actually typed. Terminal notifications arrive as ordinary requests and `isSystemInitiated` is set on some and not others, so the text gets trusted, not the flag.
+Three things had to be thrown out. `@agent Try Again` writes a real request record carrying no intent whatsoever, and it was the newest request in eight of those 23 sessions — the reader walks back up to ten records looking for something a person actually typed. Terminal notifications arrive as ordinary requests and `isSystemInitiated` is set on some and not others, so the text gets trusted, not the flag. And bare acknowledgements are real messages that say nothing about state — two sessions ended on `cool`.
+
+The walk-back used to fall back to the newest record when nothing substantive turned up, which reinstated the exact boilerplate it had just walked past: five of 23 sessions were sending `Last request: @agent Try Again`. There is no fallback now, which is the whole reason the recovered figure is 16 rather than 22. A missing last request beats a misleading one — `buildStatusPrompt` omits the line and the assistant's last message carries the weight.
+
+### Redaction
+
+Session files carry things that were never meant to travel. One session held a live Vaultwarden token in its tool activity and a password as its last request, and both would have gone to the model provider verbatim.
+
+`redact()` in `subtitleText.ts` masks the shapes that are unambiguously credentials. It runs on the **assembled prompt**, not field by field, so a field added later cannot quietly bypass it. It is deliberately small — a stop on the obvious cases, not a scanner — and `npm run probe:exchange -- --prompt` is what proves it against real sessions rather than invented ones.
 
 Assistant prose is the part with no `kind` discriminator at all — a bare serialised `MarkdownString` sitting among `toolInvocationSerialized` and `thinking` parts. A turn that ends on tool calls has no prose of its own, which is why 12 of 23 is the real number and not a bug. When an index has none the reader falls back to the previous one; the last sentence the assistant wrote still describes where the session is.
 

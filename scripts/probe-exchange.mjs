@@ -8,7 +8,7 @@ import * as path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { readLastExchange, readOpeningMessages } = require('../out/core/sessionContent.js');
-const { buildStatusPrompt, buildTaskPrompt, buildTitlePrompt, tidy, tidyTitle } = require('../out/core/subtitleText.js');
+const { buildStatusPrompt, buildTaskPrompt, buildTitlePrompt, redact, tidy, tidyTitle } = require('../out/core/subtitleText.js');
 const { listSessions } = require('../out/core/sessions.js');
 const { WORKSPACE_SESSIONS_DIRNAME, EMPTY_WINDOW_SESSIONS_DIRNAME } = require('../out/core/locations.js');
 
@@ -66,6 +66,35 @@ for (const [input, expected] of TIDY_CASES) {
 	}
 }
 console.log(`tidy: ${TIDY_CASES.length - tidyFailures} of ${TIDY_CASES.length} cases pass`);
+
+// what actually turned up in real sessions, plus the near-misses that must survive —
+// over-redaction is not free, it costs the model the context it needs to say anything
+const REDACT_CASES = [
+	[String.raw`Sent $env:BWSESSION='kX7Bc7NgKL0ldmGh6Nd01u2ZSY2JxNBO+u60Msag281' to terminal`, true],
+	['pw is jesusfuckingchrist', true],
+	['password: hunter2', true],
+	['the passphrase is correct-horse-battery', true],
+	['ANTHROPIC_API_KEY=sk-ant-abcdefgh12345678', true],
+	['token is fine but ghp_abcdefghijklmnopqrstuvwx leaked', true],
+	['Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', true],
+	['-----BEGIN OPENSSH PRIVATE KEY-----', true],
+	// real strings from real sessions that carry no secret and must come through intact
+	['STONKSCOLLECTORDIR=/srv/stonks/collectors', false],
+	['Running ssh pg-stonks "cd /srv/stonks && .venv/bin/python -m datasets"', false],
+	['The Vaultwarden unlock is active in PowerShell', false],
+	['Read lines 1 to 160', false]
+];
+
+let redactFailures = 0;
+for (const [input, shouldMask] of REDACT_CASES) {
+	const masked = redact(input).includes('[redacted]');
+	if (masked !== shouldMask) {
+		redactFailures++;
+		console.log(`redact ${shouldMask ? 'MISSED' : 'OVER-MASKED'}: ${JSON.stringify(input.slice(0, 70))}`);
+		console.log(`       got ${JSON.stringify(redact(input).slice(0, 70))}`);
+	}
+}
+console.log(`redact: ${REDACT_CASES.length - redactFailures} of ${REDACT_CASES.length} cases pass`);
 console.log('');
 const dirs = sessionDirs();
 const sessions = (await Promise.all(dirs.map(dir => listSessions(dir)))).flat();

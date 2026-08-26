@@ -152,7 +152,8 @@ export class SubtitleService implements vscode.Disposable {
 				continue;
 			}
 			this.lastAutoAt = now;
-			this.request(target, false, preferences.mode);
+			// a status line the user asked for stays a status line, whatever the setting says
+			this.request(target, false, meta.subtitleMode ?? preferences.mode);
 			return;
 		}
 	}
@@ -230,7 +231,7 @@ export class SubtitleService implements vscode.Disposable {
 			if (entry.mode === 'title') {
 				await this.tags.setTitle(target.sessionId, answer, 'llm');
 			} else {
-				await this.tags.setSubtitle(target.sessionId, answer, 'llm');
+				await this.tags.setSubtitle(target.sessionId, answer, 'llm', entry.mode);
 			}
 			this.log.appendLine(
 				`[${entry.mode}] ${target.sessionId} via ${model.id} (${bytesScanned} bytes scanned): ${answer}`

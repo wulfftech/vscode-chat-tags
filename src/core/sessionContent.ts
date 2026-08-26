@@ -60,7 +60,9 @@ const RESPONSE_PATH = /^"requests",(\d+),"response"$/;
 // the retry button and the slash commands write real request records carrying no intent
 // at all, and across 23 real sessions '@agent Try Again' was the newest request in eight
 // of them — walk past these to whatever the user actually asked
-const BOILERPLATE = /^(@agent\b|\/(compact|clear|help|new)\b|(continue|try again|go on|proceed|carry on|yes|yep|ok|okay|k|go)\b[.!]?$)/i;
+// bare acknowledgements are the same problem wearing a friendlier face: 'cool' is a real
+// message that tells a status prompt nothing, and it was the last word in two sessions
+const BOILERPLATE = /^(@agent\b|\/(compact|clear|help|new)\b|(continue|try again|go on|proceed|carry on|yes|yep|yeah|ok|okay|k|go|cool|nice|great|good|thanks|thanx|cheers|ta|perfect|sweet|awesome|excellent|brilliant|lovely|sure|done)\b[.!?]?$|(omg\s+)?(yes|yeah|yep|ok|okay)\b[\s,]*(please|do it|go ahead|proceed|carry on)\b[.!]?$)/i;
 
 // terminal notifications arrive as ordinary requests — isSystemInitiated is set on some
 // of them and not others, so the text is what has to be trusted
@@ -423,10 +425,10 @@ export async function readLastExchange(
 
 	const handle = await fs.promises.open(filePath, 'r');
 	try {
-		// newest first, keeping the best candidate seen. a terminal notification and a retry
-		// are both real requests that say nothing about what the user wanted
+		// newest first, stopping at the first thing a person actually typed. there is no
+		// fallback to the newest record on purpose — it reinstates the boilerplate this just
+		// walked past, and no 'Last request' line at all beats one the model reads as intent
 		let best: string | undefined;
-		let fallback: string | undefined;
 		let newest = true;
 
 		outer:
@@ -443,7 +445,6 @@ export async function readLastExchange(
 					result.systemInitiated = Boolean(request?.isSystemInitiated);
 					newest = false;
 				}
-				fallback = fallback ?? text;
 				if (!request?.isSystemInitiated && substantive(text)) {
 					best = text;
 					break outer;
@@ -451,9 +452,8 @@ export async function readLastExchange(
 			}
 		}
 
-		const chosen = best ?? fallback;
-		if (chosen) {
-			result.userText = clamp(chosen, MAX_USER_CHARS);
+		if (best) {
+			result.userText = clamp(best, MAX_USER_CHARS);
 		}
 
 		const harvest = await harvestResponses(handle, offsets.responses);

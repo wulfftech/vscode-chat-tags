@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { SubtitleMode } from '../core/subtitleText';
 
 // categories and per-session metadata live in globalState, not workspaceState —
 // session ids are uuids and unique across workspaces, and empty-window sessions
@@ -20,6 +21,9 @@ export interface SessionMeta {
 	subtitle?: string;
 	subtitleSource?: 'manual' | 'llm';
 	subtitleUpdatedAt?: number;
+	// which kind of line this is, so the automatic sweep regenerates what the session was
+	// last given rather than whatever chatTags.subtitleMode happens to say today
+	subtitleMode?: SubtitleMode;
 	// shown instead of the title in the session file. the file itself is never written —
 	// vs code holds it open and appends to it, so our record would be clobbered or worse
 	title?: string;
@@ -153,11 +157,20 @@ export class TagStore {
 		this._onDidChange.fire();
 	}
 
-	async setSubtitle(sessionId: string, subtitle: string | undefined, source: 'manual' | 'llm'): Promise<void> {
+	async setSubtitle(
+		sessionId: string,
+		subtitle: string | undefined,
+		source: 'manual' | 'llm',
+		mode?: SubtitleMode
+	): Promise<void> {
+		const kept = subtitle?.trim();
 		await this.patchMeta(sessionId, {
-			subtitle: subtitle?.trim() ? subtitle.trim() : undefined,
-			subtitleSource: subtitle?.trim() ? source : undefined,
-			subtitleUpdatedAt: subtitle?.trim() ? Date.now() : undefined
+			subtitle: kept ? kept : undefined,
+			subtitleSource: kept ? source : undefined,
+			subtitleUpdatedAt: kept ? Date.now() : undefined,
+			// a hand-edit leaves the mode alone — the sweep skips manual subtitles anyway, and
+			// clearing it would lose which kind of line the session had if it ever goes back
+			subtitleMode: kept ? (mode ?? this.meta(sessionId).subtitleMode) : undefined
 		});
 	}
 
