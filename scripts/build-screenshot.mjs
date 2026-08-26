@@ -366,5 +366,13 @@ execFileSync(browser, [
 	`file:///${path.resolve('dev/screenshot.html').replace(/\\/g, '/')}`
 ], { stdio: 'ignore' });
 
-fs.rmSync(profile, { recursive: true, force: true });
+// chrome's crashpad handler still holds CrashpadMetrics-active.pma for a moment after
+// the browser process exits, so on windows this throws EPERM about half the time. the
+// shot is already on disk by here — a temp directory outliving the run is not a failure,
+// and letting it throw meant a successful render reported nothing and exited non-zero
+try {
+	fs.rmSync(profile, { recursive: true, force: true });
+} catch (error) {
+	console.log(`left ${profile} behind (${error.code})`);
+}
 console.log(`wrote media/screenshot.png (${(fs.statSync(out).size / 1024).toFixed(0)} KB, ${WIDTH * 2}x${HEIGHT * 2})`);
