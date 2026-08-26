@@ -89,12 +89,9 @@ interface EditorLayout {
 	groups?: Array<{ size?: number; groups?: unknown[] }>;
 }
 
-/**
- * Guarantees a full-height column on the right and focuses it, so a subsequent open
- * lands there. Composed from setEditorLayout + a focus command rather than passing a
- * view column to the open call — the chat open path routes through workbench actions
- * that target the *active* group, so moving the active group is what actually works.
- */
+// composed from setEditorLayout plus a focus command rather than passing a view column
+// to the open call — the chat open path routes through workbench actions that target the
+// *active* group, so moving the active group is the only thing that actually works
 export async function focusDedicatedColumn(ratio: number): Promise<void> {
 	let layout: EditorLayout | undefined;
 	try {
@@ -132,7 +129,6 @@ export async function focusSideGroup(): Promise<void> {
 	await vscode.commands.executeCommand('workbench.action.focusLastEditorGroup');
 }
 
-/** Applies whatever window arrangement the chosen target needs before opening. */
 export async function prepareForOpen(preferences: OpenPreferences): Promise<void> {
 	if (preferences.target === 'dedicatedRight') {
 		await focusDedicatedColumn(preferences.ratio);

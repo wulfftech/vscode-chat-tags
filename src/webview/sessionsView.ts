@@ -82,7 +82,6 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		this.post();
 	}
 
-	/** Opens the in-pane categories panel. */
 	openCategories(): void {
 		void this.view?.webview.postMessage({ type: 'openPanel', panel: 'categories' });
 		this.view?.show?.(true);
@@ -171,7 +170,6 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		}, true, mode ?? readSubtitlePreferences().mode);
 	}
 
-	/** Opens the in-pane settings panel. */
 	openSettingsPanel(): void {
 		void this.view?.webview.postMessage({ type: 'openPanel', panel: 'settings' });
 		this.view?.show?.(true);
