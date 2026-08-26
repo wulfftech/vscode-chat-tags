@@ -35,6 +35,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	// commands first — if anything below throws, these still exist and the failure is
 	// visible through Show Log rather than a silently dead view
 	context.subscriptions.push(
+		vscode.commands.registerCommand('chatTags.newChat', () => provider.newChat()),
 		vscode.commands.registerCommand('chatTags.refresh', () => provider.refresh()),
 		vscode.commands.registerCommand('chatTags.showLog', () => log.show(true)),
 		vscode.commands.registerCommand('chatTags.manageCategories', () => provider.openCategories()),

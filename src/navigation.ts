@@ -15,11 +15,13 @@ const MARSHALLED_AGENT_SESSION_CONTEXT = 25;
 
 export type NavigationRung = 'vscode-open' | 'bare-resource' | 'marshalled-context';
 
-export interface NavigationAttempt {
-	rung: NavigationRung;
+export interface Attempt<R extends string> {
+	rung: R;
 	ok: boolean;
 	error?: string;
 }
+
+export type NavigationAttempt = Attempt<NavigationRung>;
 
 export interface NavigationResult {
 	sessionId: string;
@@ -28,7 +30,7 @@ export interface NavigationResult {
 	attempts: NavigationAttempt[];
 }
 
-async function attempt(rung: NavigationRung, run: () => Thenable<unknown>): Promise<NavigationAttempt> {
+async function attempt<R extends string>(rung: R, run: () => Thenable<unknown>): Promise<Attempt<R>> {
 	try {
 		await run();
 		return { rung, ok: true };
@@ -62,6 +64,44 @@ export async function openSession(sessionId: string): Promise<NavigationResult> 
 	}
 
 	return { sessionId, uri: uriString, attempts };
+}
+
+// starting a chat is the same shape of problem as opening one — no public api, and more
+// than one workbench command that looks like the right answer. all three ids below are
+// present in the 1.134.0 bundle:
+//   1. openNewSessionEditor is registered once per session type, so the id carries the
+//      type instead of being bare, and SessionType.Local is the string 'local'. lands as
+//      an editor tab, which is where this extension opens everything else
+//   2. newLocalChat calls startNewLocalSession on the view. its precondition is
+//      chat.location == panel, so it does nothing for anyone running chat in the sidebar
+//   3. newChat is the generic one and clears the current widget rather than adding a tab
+export type NewSessionRung = 'new-session-editor' | 'new-local-chat' | 'new-chat';
+
+export interface NewSessionResult {
+	succeeded?: NewSessionRung;
+	attempts: Array<Attempt<NewSessionRung>>;
+}
+
+const NEW_SESSION_LADDER: Array<[NewSessionRung, string]> = [
+	['new-session-editor', 'workbench.action.chat.openNewSessionEditor.local'],
+	['new-local-chat', 'workbench.action.chat.newLocalChat'],
+	['new-chat', 'workbench.action.chat.newChat']
+];
+
+// same caveat as openSession — a command that resolves has not necessarily done anything,
+// so the rung that stuck goes to the log where a break is visible
+export async function newSession(): Promise<NewSessionResult> {
+	const attempts: Array<Attempt<NewSessionRung>> = [];
+
+	for (const [rung, command] of NEW_SESSION_LADDER) {
+		const result = await attempt(rung, () => vscode.commands.executeCommand(command));
+		attempts.push(result);
+		if (result.ok) {
+			return { succeeded: rung, attempts };
+		}
+	}
+
+	return { attempts };
 }
 
 // deleting goes through the workbench, never through fs.unlink. the session index lives

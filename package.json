@@ -46,6 +46,11 @@
 		},
 		"commands": [
 			{
+				"command": "chatTags.newChat",
+				"title": "New Chat",
+				"category": "Chat Tags"
+			},
+			{
 				"command": "chatTags.manageCategories",
 				"title": "Edit Categories",
 				"category": "Chat Tags"

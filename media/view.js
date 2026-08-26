@@ -18,6 +18,7 @@
 	// font decides, and ⚙ in particular lands as an emoji on some systems
 	const SVG_NS = 'http://www.w3.org/2000/svg';
 	const ICON_PATHS = {
+		plus: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
 		gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z',
 		refresh: 'M17.65 6.35A7.96 7.96 0 0 0 12 4c-4.42 0-7.99 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z',
 		clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z',
@@ -737,6 +738,13 @@
 		toolbar.appendChild(el('div', 'spacer'));
 		toolbar.appendChild(el('span', 'count',
 			unread ? unread + ' new · ' + live.length : String(live.length)));
+
+		const newChat = el('button', 'icon');
+		newChat.appendChild(icon('plus', 16));
+		newChat.title = 'New chat';
+		newChat.setAttribute('aria-label', 'New chat');
+		newChat.addEventListener('click', () => send({ type: 'newChat' }));
+		toolbar.appendChild(newChat);
 
 		const sort = el('button', 'icon');
 		sort.appendChild(icon('sort', 15));

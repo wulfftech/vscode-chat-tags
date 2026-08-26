@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { ChatSessionInfo, activityStateOf, compareSessions, listSessions } from '../core/sessions';
 import { PALETTE, TagStore } from '../model/categories';
 import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
-import { deleteSession, openSession } from '../navigation';
+import { deleteSession, newSession, openSession } from '../navigation';
 import { GenerationMode } from '../core/subtitleText';
 import { SubtitleService } from '../subtitles';
 
@@ -229,6 +229,9 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 			case 'open':
 				await this.open(message.sessionId);
 				return;
+			case 'newChat':
+				await this.newChat();
+				return;
 			case 'setCategory':
 				await this.tags.setCategory(message.sessionId, message.categoryId ?? undefined);
 				return;
@@ -346,6 +349,30 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				this.log.show(true);
 			}
 		}
+	}
+
+	async newChat(): Promise<void> {
+		// same arrangement the click path uses, so a new chat lands where an opened one
+		// would rather than wherever the workbench felt like putting it
+		await prepareForOpen(readPreferences());
+
+		const result = await newSession();
+		this.log.appendLine(`[new] -> ${result.succeeded ?? 'ALL RUNGS FAILED'}`);
+		if (!result.succeeded) {
+			const choice = await vscode.window.showWarningMessage(
+				'Chat Tags could not start a new chat. The workbench command may have changed in this VS Code version.',
+				'Show Log'
+			);
+			if (choice === 'Show Log') {
+				this.log.show(true);
+			}
+			return;
+		}
+
+		// the file watcher picks the new session up on its own, but only once the
+		// workbench has written it — a refresh here means the row appears with the tab
+		// rather than up to a repaint interval later
+		await this.refresh();
 	}
 
 	private html(webview: vscode.Webview): string {
