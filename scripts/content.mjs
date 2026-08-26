@@ -31,7 +31,9 @@ export function loadContent() {
 		createdAt: NOW - Math.round((entry.createdDaysAgo ?? 0) * DAY)
 	}));
 
-	return { categories: raw.categories, models: raw.models, sessions };
+	// panes map pane id -> the session ids that pane draws, so each frame of the shot
+	// shows a different set of chats instead of the same list six times over
+	return { categories: raw.categories, models: raw.models, sessions, panes: raw.panes ?? {} };
 }
 
 // mirrors compareSessions() in core/sessions.ts. the provider sorts before posting and

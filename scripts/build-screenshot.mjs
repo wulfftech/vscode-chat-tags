@@ -10,7 +10,7 @@ import { NOW, loadContent } from './content.mjs';
 const css = fs.readFileSync('media/view.css', 'utf8');
 const js = fs.readFileSync('media/view.js', 'utf8');
 const logo = fs.readFileSync('media/icon.png').toString('base64');
-const { categories, models, sessions } = loadContent();
+const { categories, models, sessions, panes } = loadContent();
 
 const PANE_WIDTH = 340;
 const COLUMNS = 3;
@@ -225,6 +225,7 @@ const NOW = ${NOW};
 const CATEGORIES = ${JSON.stringify(categories)};
 const MODELS = ${JSON.stringify(models)};
 const SESSIONS = ${JSON.stringify(sessions)};
+const PANE_SESSIONS = ${JSON.stringify(panes)};
 const PANES = ${JSON.stringify(PANES)};
 
 // view.js binds to #root and window messages, so each pane gets its own run with those
@@ -261,7 +262,13 @@ function mount(pane) {
 	const compare = settings.sortBy === 'created'
 		? (a, b) => (b.createdAt || b.lastActivityAt) - (a.createdAt || a.lastActivityAt)
 		: (a, b) => b.lastActivityAt - a.lastActivityAt;
-	const visible = (settings.showArchived ? SESSIONS : SESSIONS.filter(s => !s.archived))
+	// each pane draws its own slice of the pool. an unlisted pane falls back to the lot,
+	// so adding a pane without a list still renders something rather than an empty box
+	const picked = PANE_SESSIONS[pane.id];
+	const pool = picked
+		? picked.map(id => SESSIONS.find(s => s.sessionId === id)).filter(Boolean)
+		: SESSIONS;
+	const visible = (settings.showArchived ? pool : pool.filter(s => !s.archived))
 		.slice().sort(compare);
 
 	const post = message => listeners.forEach(fn => fn({ data: message }));
@@ -269,7 +276,7 @@ function mount(pane) {
 		type: 'render',
 		sessions: visible,
 		categories: CATEGORIES,
-		archivedCount: SESSIONS.filter(s => s.archived).length,
+		archivedCount: pool.filter(s => s.archived).length,
 		settings: settings,
 		models: MODELS
 	});
