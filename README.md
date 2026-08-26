@@ -226,7 +226,7 @@ Every one is a real VS Code setting, so the pane and the Settings UI are two win
 ## Install
 
 ```bash
-code --install-extension chat-tags-0.10.0.vsix
+code --install-extension chat-tags-0.11.0.vsix
 ```
 
 The Chat Tags icon shows up in the activity bar. Every activation writes where it found your sessions to `globalStorage/wulfftech.chat-tags/last-activation.json` — read that first when a window comes up empty, before you start blaming anything else.
