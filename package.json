@@ -3,6 +3,7 @@
 	"displayName": "Chat Tags",
 	"description": "Colour-code, categorise and annotate VS Code chat sessions.",
 	"license": "MIT",
+	"author": "WulffTech",
 	"icon": "media/icon.png",
 	"repository": {
 		"type": "git",
