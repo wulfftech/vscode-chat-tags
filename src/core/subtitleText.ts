@@ -24,7 +24,7 @@ export const MAX_TITLE_CHARS = 60;
 // deliberately small — this is not a scanner, it is a stop on the obvious cases
 const SECRETS: ReadonlyArray<RegExp> = [
 	// an assignment whose name says what it holds, quoted or bare, as tool activity logs it
-	/\b[A-Za-z_][A-Za-z0-9_]*(?:SESSION|TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|KEY|CREDENTIAL)\s*=\s*['"]?[^\s'";|&]+/gi,
+	/\b[A-Za-z_][A-Za-z0-9_]*(?:SESSION|TOKEN|SECRET|PASSWORD|PASSWD|APIKEY|API_KEY|KEY|CREDENTIAL)\s*=\s*['"]?[^\s'";|&]+['"]?/gi,
 	// said out loud, which is how a password usually reaches a chat in the first place
 	/\b(?:password|passwd|passphrase|pw)\s*(?:is|are|=|:)\s*\S+/gi,
 	// vendor-prefixed keys identify themselves, so they need no surrounding context
