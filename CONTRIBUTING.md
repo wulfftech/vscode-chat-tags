@@ -128,6 +128,18 @@ Reaching the fifth opening message is not the cheap end of the file it sounds li
 | Opening messages recovered | 23 of 23 |
 | Opening scan time | 87 ms over 85 MB |
 
+## A new chat is invisible until it is used
+
+The + button starts a chat, and the row does not appear until the first message lands. That is not the button failing — VS Code holds an untouched chat in memory and writes no session file at all.
+
+Measured on a live window: after clicking +, the newest `requestCount: 0` file on disk was 47 hours old. Nothing had been written. Send one message and the file appears carrying one request, the watcher fires, and the row shows up.
+
+Two filters would hide it even if the file existed. `listSessions` drops sessions with no requests and no title, and the native list hides those too — 27 of 53 files on one machine.
+
+So the pane cannot show an unsaved chat, and a placeholder row would be worse: with no session id it could not be opened, categorised, or reconciled against the real file when it lands. Instead `adoptNewSession` remembers which ids existed when + was pressed and hands the selection to the first unrecognised one that turns up, inside a five minute grace window. Opening anything by hand cancels it, because that settles what the user is actually looking at.
+
+**The pane cannot read editor focus.** A chat session editor reaches the tabs API as `TabInputKind.Unknown`, so `tab.input` is `undefined` and carries no session URI. Selection is therefore whatever this extension opened itself, which is the same thing in practice.
+
 ## Why a webview, not a tree view
 
 A `TreeView` cannot do what this needs. `TreeItem` has no height or multiline property, `TreeViewOptions` exposes only four fields, and no workbench setting changes tree row height. Rows are nailed to ~22px on a single line.

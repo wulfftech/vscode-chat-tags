@@ -185,6 +185,8 @@ Clicking a session can rearrange your window. Three modes, in the pane under **W
 
 A new chat lands exactly where a clicked one would, so the `+` obeys this setting instead of dropping a tab wherever the workbench fancied.
 
+**A new chat joins the list when you send its first message.** VS Code keeps an untouched chat in memory and writes nothing to disk, and this pane reads files off disk — so there is nothing to draw until you type. When the row does appear it takes the selection, so the list matches the chat you are looking at. Open something else while you are typing and your selection stays where you put it.
+
 `dedicatedRight` only rewrites the layout when there isn't already a usable right-hand column, so clicking a session doesn't stomp all over an arrangement you spent ten minutes setting up. The width is `chatTags.dedicatedColumnRatio`.
 
 ## Sessions and chat in one pane
@@ -235,7 +237,7 @@ Every one is a real VS Code setting, so the pane and the Settings UI are two win
 ## Install
 
 ```bash
-code --install-extension chat-tags-0.11.0.vsix
+code --install-extension chat-tags-0.11.1.vsix
 ```
 
 The Chat Tags icon shows up in the activity bar. Every activation writes where it found your sessions to `globalStorage/wulfftech.chat-tags/last-activation.json` — read that first when a window comes up empty, before you start blaming anything else.

@@ -10,6 +10,8 @@
 	};
 	let state = { sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0 };
 	let selectedId = null;
+	// last row scrolled to, so a repaint does not keep yanking the list back
+	let revealedId = null;
 	// null | 'categories' | 'settings' — one at a time, they are separate things
 	let openPanel = null;
 	let editingSubtitleFor = null;
@@ -814,6 +816,15 @@
 		}
 		root.appendChild(list);
 
+		// a selection you cannot see is not a selection, and an adopted row can be anywhere
+		if (selectedId && selectedId !== revealedId) {
+			revealedId = selectedId;
+			const chosen = list.querySelector('.row.selected');
+			if (chosen && chosen.scrollIntoView) {
+				chosen.scrollIntoView({ block: 'nearest' });
+			}
+		}
+
 		// hidden archived sessions are otherwise invisible, and a count nobody can find is
 		// how you end up thinking a chat was deleted
 		if (!state.settings.showArchived && state.archivedCount) {
@@ -849,6 +860,11 @@
 			return;
 		}
 		if (message && message.type === 'render') {
+			// the provider owns the selection once anything has been opened, so a row adopted
+			// after a new chat lands shows up without the user clicking it
+			if (message.activeSessionId !== undefined) {
+				selectedId = message.activeSessionId;
+			}
 			state = {
 				sessions: message.sessions,
 				categories: message.categories,

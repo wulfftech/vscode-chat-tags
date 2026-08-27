@@ -10,6 +10,11 @@ import { SubtitleService } from '../subtitles';
 // activity is time-based, so the view has to repaint even when nothing on disk moved
 const REPAINT_INTERVAL_MS = 20_000;
 
+// how long a chat started from the + button stays eligible to claim the selection. a new
+// chat reaches disk only when its first message lands, and that is however long the user
+// takes to type it
+const NEW_SESSION_GRACE_MS = 5 * 60_000;
+
 interface RenderedSession {
 	sessionId: string;
 	title: string;
@@ -43,6 +48,15 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	private view?: vscode.WebviewView;
 	private sessions: ChatSessionInfo[] = [];
 	private timer?: NodeJS.Timeout;
+	// which row draws as selected. the pane cannot read editor focus — a chat editor
+	// reaches the tabs api as TabInputKind.Unknown, so tab.input is undefined and carries
+	// no session uri. this is what we opened ourselves, which is the same thing in practice
+	private activeSessionId?: string;
+	// a chat started from + has no file until its first message, so there is no row to
+	// select yet. these hold the intent until the session turns up on disk
+	private awaitingNewSession = false;
+	private knownBeforeNewChat = new Set<string>();
+	private awaitingUntil = 0;
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
@@ -79,7 +93,27 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	async refresh(): Promise<void> {
 		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir)));
 		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+		this.adoptNewSession();
 		this.post();
+	}
+
+	// the chat the + button started shows up seconds later, once the user has sent
+	// something. at that moment it is still the chat they are looking at, so it takes the
+	// selection — unless they opened something else while typing, which says otherwise
+	private adoptNewSession(): void {
+		if (!this.awaitingNewSession) {
+			return;
+		}
+		if (Date.now() > this.awaitingUntil) {
+			this.awaitingNewSession = false;
+			return;
+		}
+		// sessions are newest first, so the first unrecognised id is the one just created
+		const fresh = this.sessions.find(session => !this.knownBeforeNewChat.has(session.sessionId));
+		if (fresh) {
+			this.activeSessionId = fresh.sessionId;
+			this.awaitingNewSession = false;
+		}
 	}
 
 	openCategories(): void {
@@ -126,6 +160,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 			sessions: rendered,
 			categories: this.tags.categories,
 			archivedCount,
+			activeSessionId: this.activeSessionId,
 			settings: {
 				openTarget: preferences.target,
 				dedicatedColumnRatio: preferences.ratio,
@@ -331,6 +366,11 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async open(sessionId: string): Promise<void> {
+		this.activeSessionId = sessionId;
+		// opening something by hand settles the question of what the user is looking at, so a
+		// pending new chat no longer gets to take the selection off them
+		this.awaitingNewSession = false;
+
 		// opening is what clears the attention state — that's the whole contract of the
 		// left border, so mark first and let the result post the repaint
 		await this.tags.markSeen(sessionId);
@@ -369,9 +409,12 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		// the file watcher picks the new session up on its own, but only once the
-		// workbench has written it — a refresh here means the row appears with the tab
-		// rather than up to a repaint interval later
+		// the workbench writes nothing until the chat has its first message, so this refresh
+		// finds no new row. the watcher fires when the file finally lands, and adoptNewSession
+		// hands the selection over then
+		this.knownBeforeNewChat = new Set(this.sessions.map(session => session.sessionId));
+		this.awaitingNewSession = true;
+		this.awaitingUntil = Date.now() + NEW_SESSION_GRACE_MS;
 		await this.refresh();
 	}
 
