@@ -5,7 +5,7 @@ import { listSessions } from './core/sessions';
 import { prepareForOpen, readListPreferences, writeSetting } from './layout';
 import { TagStore } from './model/categories';
 import { openSession } from './navigation';
-import { runLayoutSpike, runSpike } from './spike';
+import { runLayoutSpike, runNewSessionSpike, runSpike } from './spike';
 import { SubtitleService } from './subtitles';
 import { SessionsViewProvider } from './webview/sessionsView';
 
@@ -48,9 +48,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		vscode.commands.registerCommand('chatTags.toggleGroupByCategory', () => toggleList('groupBy')),
 		vscode.commands.registerCommand('chatTags.toggleShowArchived', () => toggleList('showArchived')),
 		vscode.commands.registerCommand('chatTags.runNavigationSpike', async () => {
+			// the new-chat ladder ends on a command that clears the chat widget, so anything
+			// typed and unsent goes with it. the headless path below skips this on purpose
+			const go = await vscode.window.showWarningMessage(
+				'The spike closes every editor tab and starts several chats. Anything typed but unsent in the chat widget is lost.',
+				{ modal: true },
+				'Run Spike'
+			);
+			if (go !== 'Run Spike') {
+				return;
+			}
 			const report = await runNavigationSpike(located, log);
 			log.show(true);
-			vscode.window.showInformationMessage(`Chat Tags spike: ${report.verdict}`);
+			vscode.window.showInformationMessage(
+				`Chat Tags spike — open: ${report.verdict} · new chat: ${report.newChat.verdict}`
+			);
 		})
 	);
 
@@ -139,6 +151,10 @@ async function runNavigationSpike(located: ResolvedLocations, log: vscode.Output
 		siblingCandidate: located.siblingCandidate
 	});
 
+	// second, because this half starts chats and the open rungs should be measured against
+	// a window that has had none started in it
+	const newChat = await runNewSessionSpike();
+
 	log.appendLine('');
 	log.appendLine('=== navigation spike ===');
 	log.appendLine(`vscode           : ${report.vscodeVersion}`);
@@ -149,7 +165,20 @@ async function runNavigationSpike(located: ResolvedLocations, log: vscode.Output
 	}
 	log.appendLine(`verdict          : ${report.verdict}`);
 
-	return report;
+	log.appendLine('');
+	log.appendLine('=== new chat spike ===');
+	for (const rung of newChat.rungs) {
+		log.appendLine(`  ${rung.verdict.toUpperCase().padEnd(9)} ${rung.rung} — ${rung.command}`);
+		if (rung.error) {
+			log.appendLine(`            ${rung.error}`);
+		}
+		if (rung.siblings?.length) {
+			log.appendLine(`            registered instead: ${rung.siblings.join(', ')}`);
+		}
+	}
+	log.appendLine(`verdict          : ${newChat.verdict}`);
+
+	return { ...report, newChat };
 }
 
 // the pane's own menu is the primary control; these exist so the palette and keybindings

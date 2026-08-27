@@ -10,7 +10,7 @@ import { localSessionUriString } from './core/sessionUri';
 //      member above it. last resort.
 // openSession reports which rung worked so a break is visible instead of silent
 
-const OPEN_COMMAND = 'workbench.action.chat.openSessionInEditorGroup';
+export const OPEN_COMMAND = 'workbench.action.chat.openSessionInEditorGroup';
 const MARSHALLED_AGENT_SESSION_CONTEXT = 25;
 
 export type NavigationRung = 'vscode-open' | 'bare-resource' | 'marshalled-context';
@@ -39,6 +39,27 @@ async function attempt<R extends string>(rung: R, run: () => Thenable<unknown>):
 	}
 }
 
+export interface Rung<R extends string> {
+	rung: R;
+	run: () => Thenable<unknown>;
+}
+
+// the spike walks this array rather than keeping its own copy, so what it proves is the
+// ladder that ships. the marshalled id especially — two copies of a compile-time literal
+// drift apart and the spike goes green on a number the extension no longer sends
+export function openLadder(uri: vscode.Uri): Array<Rung<NavigationRung>> {
+	return [
+		{ rung: 'vscode-open', run: () => vscode.commands.executeCommand('vscode.open', uri) },
+		{ rung: 'bare-resource', run: () => vscode.commands.executeCommand(OPEN_COMMAND, { resource: uri }) },
+		{
+			rung: 'marshalled-context', run: () => vscode.commands.executeCommand(OPEN_COMMAND, {
+				$mid: MARSHALLED_AGENT_SESSION_CONTEXT,
+				session: { resource: uri }
+			})
+		}
+	];
+}
+
 // walks the ladder until a rung sticks
 // a command resolving only means it didn't throw — see spike.ts for real evidence
 export async function openSession(sessionId: string): Promise<NavigationResult> {
@@ -46,16 +67,7 @@ export async function openSession(sessionId: string): Promise<NavigationResult> 
 	const uri = vscode.Uri.parse(uriString);
 	const attempts: NavigationAttempt[] = [];
 
-	const ladder: Array<[NavigationRung, () => Thenable<unknown>]> = [
-		['vscode-open', () => vscode.commands.executeCommand('vscode.open', uri)],
-		['bare-resource', () => vscode.commands.executeCommand(OPEN_COMMAND, { resource: uri })],
-		['marshalled-context', () => vscode.commands.executeCommand(OPEN_COMMAND, {
-			$mid: MARSHALLED_AGENT_SESSION_CONTEXT,
-			session: { resource: uri }
-		})]
-	];
-
-	for (const [rung, run] of ladder) {
+	for (const { rung, run } of openLadder(uri)) {
 		const result = await attempt(rung, run);
 		attempts.push(result);
 		if (result.ok) {
@@ -67,25 +79,62 @@ export async function openSession(sessionId: string): Promise<NavigationResult> 
 }
 
 // starting a chat is the same shape of problem as opening one — no public api, and more
-// than one workbench command that looks like the right answer. all three ids below are
-// present in the 1.134.0 bundle:
-//   1. openNewSessionEditor is registered once per session type, so the id carries the
-//      type instead of being bare, and SessionType.Local is the string 'local'. lands as
-//      an editor tab, which is where this extension opens everything else
-//   2. newLocalChat calls startNewLocalSession on the view. its precondition is
-//      chat.location == panel, so it does nothing for anyone running chat in the sidebar
-//   3. newChat is the generic one and clears the current widget rather than adding a tab
-export type NewSessionRung = 'new-session-editor' | 'new-local-chat' | 'new-chat';
+// than one workbench command that looks like the right answer. what the spike found on
+// 1.135.0, after this shipped betting on a command that isn't registered there:
+//   - openNewSessionEditor is registered by ChatSessionsContribution._registerCommands,
+//     once per *contributed* session type. the suffixes that exist are copilotcli,
+//     copilot-cloud-agent and agent-host-copilotcli. 'local' is a SessionType member but
+//     not a contribution, so openNewSessionEditor.local has no registration to find
+//   - newLocalChat carries precondition chat.location == panel, which turns out not to
+//     matter: registerAction2 puts the bare run() in the commands registry and only menus
+//     and keybindings consult the precondition. its no-widget branch opens the chat view
+//     and calls startNewLocalSession, so it works wherever chat is docked
+//   - it leaves the session in the view though, and this extension opens everything else
+//     as an editor tab. openInEditor ("Move Chat into Editor Area") moves the focused
+//     widget across, which is the half that was missing
+const NEW_LOCAL_CHAT = 'workbench.action.chat.newLocalChat';
+const OPEN_IN_EDITOR = 'workbench.action.chat.openInEditor';
+const NEW_CHAT = 'workbench.action.chat.newChat';
+
+export type NewSessionRung = 'local-in-editor' | 'new-chat';
 
 export interface NewSessionResult {
 	succeeded?: NewSessionRung;
 	attempts: Array<Attempt<NewSessionRung>>;
 }
 
-const NEW_SESSION_LADDER: Array<[NewSessionRung, string]> = [
-	['new-session-editor', 'workbench.action.chat.openNewSessionEditor.local'],
-	['new-local-chat', 'workbench.action.chat.newLocalChat'],
-	['new-chat', 'workbench.action.chat.newChat']
+export interface NewSessionRungSpec {
+	rung: NewSessionRung;
+	// a rung is only as registered as its rarest command, and the spike checks all of them
+	commands: string[];
+	run: () => Thenable<unknown>;
+	// only the first rung leaves a tab behind. newChat acts on the panel widget, which the
+	// extension host cannot see, so the spike has to judge that one some other way
+	landsTab: boolean;
+}
+
+export const NEW_SESSION_LADDER: NewSessionRungSpec[] = [
+	{
+		rung: 'local-in-editor',
+		commands: [NEW_LOCAL_CHAT, OPEN_IN_EDITOR],
+		landsTab: true,
+		run: async () => {
+			await vscode.commands.executeCommand(NEW_LOCAL_CHAT);
+			// the session exists the moment that resolves. a move that fails leaves a real
+			// chat in the view, so falling through to the next rung would only make a second one
+			try {
+				await vscode.commands.executeCommand(OPEN_IN_EDITOR);
+			} catch {
+				// the spike's no-op verdict is what surfaces this, not a second attempt
+			}
+		}
+	},
+	{
+		rung: 'new-chat',
+		commands: [NEW_CHAT],
+		landsTab: false,
+		run: () => vscode.commands.executeCommand(NEW_CHAT)
+	}
 ];
 
 // same caveat as openSession — a command that resolves has not necessarily done anything,
@@ -93,8 +142,8 @@ const NEW_SESSION_LADDER: Array<[NewSessionRung, string]> = [
 export async function newSession(): Promise<NewSessionResult> {
 	const attempts: Array<Attempt<NewSessionRung>> = [];
 
-	for (const [rung, command] of NEW_SESSION_LADDER) {
-		const result = await attempt(rung, () => vscode.commands.executeCommand(command));
+	for (const { rung, run } of NEW_SESSION_LADDER) {
+		const result = await attempt(rung, run);
 		attempts.push(result);
 		if (result.ok) {
 			return { succeeded: rung, attempts };

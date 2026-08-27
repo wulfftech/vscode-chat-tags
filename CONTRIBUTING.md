@@ -67,6 +67,23 @@ All three opened a real chat editor tab on 1.134.0. Rung 1 being public is the r
 
 Session URIs are `vscode-chat-session://local/<base64url(sessionId)>` — url-safe, unpadded, session type as the authority.
 
+## Starting a session
+
+Same problem as opening one, with a worse trap in it. The `+` shipped betting on `workbench.action.chat.openNewSessionEditor.local`, and on 1.135.0 that id is not registered.
+
+`ChatSessionsContribution._registerCommands` registers `openNewSessionEditor.${type}` once per *contributed* session type — the live suffixes are `copilotcli`, `copilot-cloud-agent` and `agent-host-copilotcli`. `local` is a `SessionType` member rather than a contribution, so there is no registration to find. Grep the bundle for `openNewSessionEditor` and you find the template literal and call it confirmed; only a live registration check catches this, which is why the spike walks this ladder too.
+
+What runs instead:
+
+| Rung | Mechanism | Risk |
+|---|---|---|
+| 1 | `newLocalChat`, then `openInEditor` | Two internal ids, and the only rung that lands an editor tab. |
+| 2 | `newChat` | Generic. Clears the current widget instead of adding a tab. |
+
+`newLocalChat` declares `precondition: chat.location == panel`, which turns out to be irrelevant: `registerAction2` puts the bare `run()` into the commands registry, and the precondition is consulted for menus and keybindings alone. Its no-widget branch opens the chat view and calls `startNewLocalSession`, so it works with chat docked anywhere.
+
+That leaves the session in the view, and this extension puts everything else in an editor tab. `openInEditor` — "Move Chat into Editor Area" — moves the focused widget across. Rung 1 swallows a failure from that second half deliberately: the session exists as soon as the first half resolves, so falling through would only make a second one. A move that quietly stops working shows up as the spike's `no-op` verdict.
+
 ## Deleting a session
 
 `agentSession.delete`, and the argument shape is not optional trivia.
@@ -207,9 +224,27 @@ Two things it has to work around. Every pane runs its own copy of `view.js`, but
 
 ## Navigation spike
 
-Set `CHAT_TAGS_SPIKE_OUT` to a file path and the extension runs all three open rungs headlessly, writes a JSON report and closes the window.
+Set `CHAT_TAGS_SPIKE_OUT` to a file path and the extension walks both ladders headlessly, writes a JSON report and closes the window.
 
-Each rung is judged on whether an editor tab actually appeared. A command that doesn't throw hasn't necessarily done anything, and this is the whole reason the spike exists.
+```bash
+CHAT_TAGS_SPIKE_OUT=/tmp/spike.json code --extensionDevelopmentPath="D:\Code\vscode-chat-tags" --new-window
+```
+
+Give it the absolute path. With VS Code already running, the CLI hands your arguments to that instance and a relative `--extensionDevelopmentPath=.` resolves against its working directory rather than yours — the report then comes from whichever copy of the extension is installed, which reads as a clean run and tells you nothing about your build. The give-away is a report missing keys your source writes. A forwarded launch can drop `--folder-uri` too, so check `workspaceSource` in the report before believing a run covered workspace sessions.
+
+Every rung is judged on whether an editor tab actually appeared. A command that doesn't throw hasn't necessarily done anything, and this is the whole reason the spike exists.
+
+The new-chat ladder needs a second measure, because only its first rung lands a tab:
+
+| Verdict | Meaning |
+|---|---|
+| `opened` | A tab appeared — the evidence the open rungs are held to. |
+| `reachable` | The ids exist and invoking them didn't throw. All a panel-only rung can show from out here. |
+| `no-op` | Resolved and left nothing behind. The silent break this file exists for. |
+| `threw` | Registered, and rejected the call. |
+| `missing` | An id has gone. The report lists the registered ids sharing its prefix, since a rename is likelier than a deletion. |
+
+The verdict is read off the top rung alone. `newSession` stops at the first command that doesn't throw, so a rung 1 that resolves and does nothing reports success while the fallbacks below it never run.
 
 ## Still open
 

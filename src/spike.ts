@@ -1,13 +1,11 @@
 import * as vscode from 'vscode';
 import { localSessionUriString } from './core/sessionUri';
 import { ChatSessionInfo } from './core/sessions';
+import { NEW_SESSION_LADDER, OPEN_COMMAND, openLadder } from './navigation';
 
 // confirms the undocumented open path against a live workbench
 // a command that doesn't throw hasn't necessarily done anything, so each rung is
 // judged on whether an editor tab actually appeared
-
-const OPEN_COMMAND = 'workbench.action.chat.openSessionInEditorGroup';
-const MARSHALLED_AGENT_SESSION_CONTEXT = 25;
 
 interface TabSnapshot {
 	label: string;
@@ -105,19 +103,10 @@ export async function runSpike(
 
 	const rungs: RungReport[] = [];
 	if (target) {
-		const uri = vscode.Uri.parse(uriString);
-
-		rungs.push(await runRung('1-vscode-open', () =>
-			vscode.commands.executeCommand('vscode.open', uri)));
-
-		rungs.push(await runRung('2-bare-resource', () =>
-			vscode.commands.executeCommand(OPEN_COMMAND, { resource: uri })));
-
-		rungs.push(await runRung('3-marshalled-context', () =>
-			vscode.commands.executeCommand(OPEN_COMMAND, {
-				$mid: MARSHALLED_AGENT_SESSION_CONTEXT,
-				session: { resource: uri }
-			})));
+		const ladder = openLadder(vscode.Uri.parse(uriString));
+		for (const [index, { rung, run }] of ladder.entries()) {
+			rungs.push(await runRung(`${index + 1}-${rung}`, run));
+		}
 
 		await closeAllTabs();
 	}
@@ -126,7 +115,7 @@ export async function runSpike(
 	const verdict = !target
 		? 'NO SESSIONS — nothing to test against'
 		: winner
-			? `PASS via ${winner.rung} (${rungs.filter(r => r.opened).length}/3 rungs opened a session)`
+			? `PASS via ${winner.rung} (${rungs.filter(r => r.opened).length}/${rungs.length} rungs opened a session)`
 			: 'FAIL — no rung opened a session';
 
 	return {
@@ -145,6 +134,105 @@ export async function runSpike(
 		rungs,
 		verdict
 	};
+}
+
+// ── new chat spike ─────────────────────────────────────────
+
+// what a rung did
+//   opened    — an editor tab appeared, the same evidence the open rungs are held to
+//   reachable — the id exists and invoking it didn't throw, which is all a panel-only
+//               rung can ever show from out here
+//   no-op     — resolved and left nothing behind. the silent break this file exists for
+//   threw     — registered but rejected the call
+//   missing   — the id has gone from the build, so upstream renamed or dropped it
+export type NewSessionVerdict = 'opened' | 'reachable' | 'no-op' | 'threw' | 'missing';
+
+export interface NewSessionRungReport {
+	rung: string;
+	command: string;
+	registered: boolean;
+	threw: boolean;
+	error?: string;
+	expectsTab: boolean;
+	openedTabs: TabSnapshot[];
+	opened: boolean;
+	verdict: NewSessionVerdict;
+	// only filled in for a missing id — see neighbours()
+	siblings?: string[];
+}
+
+export interface NewSessionSpikeReport {
+	rungs: NewSessionRungReport[];
+	verdict: string;
+}
+
+// a missing id is more often a renamed suffix than a deleted command — openNewSessionEditor
+// is registered as `openNewSessionEditor.${type}`, one per session type, and betting on the
+// wrong type is how the + shipped broken. the ids sharing the prefix are the lead worth having
+function neighbours(commands: string[], command: string): string[] {
+	const prefix = command.slice(0, command.lastIndexOf('.') + 1);
+	return commands.filter(id => id !== command && id.startsWith(prefix)).sort();
+}
+
+function judge(spec: { landsTab: boolean }, registered: boolean, result: RungReport): NewSessionVerdict {
+	// checked before the throw, because an unregistered id throws "command not found"
+	// and that reads as a broken call rather than a renamed command
+	if (!registered) {
+		return 'missing';
+	}
+	if (result.threw) {
+		return 'threw';
+	}
+	if (!spec.landsTab) {
+		return 'reachable';
+	}
+	return result.opened ? 'opened' : 'no-op';
+}
+
+// walks the same ladder newSession() ships. an untouched chat is held in memory and never
+// written to disk, so this leaves no session files to clean up — closing the tabs is enough
+export async function runNewSessionSpike(): Promise<NewSessionSpikeReport> {
+	const commands = await vscode.commands.getCommands(true);
+	const rungs: NewSessionRungReport[] = [];
+
+	for (const spec of NEW_SESSION_LADDER) {
+		const absent = spec.commands.filter(command => !commands.includes(command));
+		const result = await runRung(spec.rung, spec.run);
+		rungs.push({
+			rung: spec.rung,
+			command: spec.commands.join(' + '),
+			registered: absent.length === 0,
+			threw: result.threw,
+			error: result.error,
+			expectsTab: spec.landsTab,
+			openedTabs: result.openedTabs,
+			opened: result.opened,
+			verdict: judge(spec, absent.length === 0, result),
+			siblings: absent.length
+				? absent.flatMap(command => neighbours(commands, command))
+				: undefined
+		});
+	}
+
+	await closeAllTabs();
+
+	// judged on the top rung alone, because newSession() stops at the first command that
+	// doesn't throw — a rung 1 that resolves and does nothing reports success and the
+	// fallbacks below it never run, however healthy they look here
+	const top = rungs[0];
+	const gone = rungs.filter(rung => rung.verdict === 'missing').map(rung => rung.command);
+	// whichever rung stops the fall is the one the shipped ladder reports as its success,
+	// so name it — 'reachable' there means the user pressed + and got nothing
+	const lands = rungs.find(rung => rung.verdict === 'opened' || rung.verdict === 'reachable');
+	const verdict = !top
+		? 'NO RUNGS — the ladder is empty'
+		: top.verdict === 'opened'
+			? `PASS via ${top.rung}${gone.length ? ` — fallback ids gone: ${gone.join(', ')}` : ''}`
+			: lands
+				? `FAIL — ${top.rung} came back ${top.verdict}, so + falls through to ${lands.rung} and reports success with no tab to show for it`
+				: `FAIL — every rung came back unusable (${rungs.map(rung => rung.verdict).join(', ')})`;
+
+	return { rungs, verdict };
 }
 
 // ── layout spike ──────────────────────────────────────────
