@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0
+
+- **+** opens a new chat as an editor tab again, where `chatTags.openTarget` puts a clicked one. It had been landing in the chat view instead. The command it relied on has no registration: VS Code only ever creates that id for contributed session types, and the plain local chat isn't one, so the button had been quietly falling through to a fallback since the day it shipped.
+- A chat that isn't on the default permission level gets a pill beside its title — **Assisted**, **Allow all** or **Autopilot**. Nothing shows on default, because a badge on every row is wallpaper. It's read out of the session file, so it's right for chats you set months ago and haven't opened since.
+- A second pill, **Auto-approving**, for a chat running commands unattended off the back of **Allow All Commands in this Session**. VS Code keeps that state nowhere at all — it lives in memory and nothing on disk says it was switched off — so this works it out from what the chat actually does. A command that ran without asking puts the pill up, the next one that had to ask takes it down.
+- That second pill matters most on a locked-down machine. If policy blocks the auto-approve permission levels, that button is the only route left, and this is the only warning you get.
+
 ## 0.11.1
 
 - A chat started from **+** takes the selection in the list as soon as it appears, so the row matches the chat you are looking at. Open something else while you type and it leaves your selection alone.

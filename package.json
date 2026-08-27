@@ -13,7 +13,7 @@
 		"url": "https://github.com/wulfftech/vscode-chat-tags/issues"
 	},
 	"homepage": "https://github.com/wulfftech/vscode-chat-tags#readme",
-	"version": "0.11.1",
+	"version": "0.12.0",
 	"publisher": "wulfftech",
 	"engines": {
 		"vscode": "^1.104.0"
