@@ -2,7 +2,7 @@
 	"name": "chat-tags",
 	"displayName": "Chat Tags",
 	"description": "Colour-code, categorise and annotate VS Code chat sessions.",
-	"license": "MIT",
+	"license": "GPL-3.0-or-later",
 	"author": "WulffTech",
 	"icon": "media/icon.png",
 	"repository": {
