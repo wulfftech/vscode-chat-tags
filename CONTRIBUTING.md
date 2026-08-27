@@ -222,6 +222,70 @@ It renders the real `view.css` and `view.js` through headless Chrome rather than
 
 Two things it has to work around. Every pane runs its own copy of `view.js`, but `closePopovers()` and the document click listener are global, so an open menu gets torn down by the next pane that mounts — each one is lifted out as a static clone and put back at the end. And those clones live on `<body>`, outside any `.pane`, so they carry the theme variables themselves or they paint with no background at all.
 
+## Permission level
+
+Every session file carries the level its picker is set to. `inputState.permissionLevel` is in the `kind:0` header on all 61 sessions here, so `readFirstLine` already has it, and moving the picker mid-session writes `{"kind":1,"k":["inputState","permissionLevel"]}` — the same record shape as `inputText`, picked up in the pass `deltaScan` was already making. Neither costs a byte of extra I/O.
+
+The delta half is not optional. Reading the header alone finds one non-default session out of 62; the patches take that to seven, because most of them were switched after the session started.
+
+| Level | Picker calls it | Shown as |
+|---|---|---|
+| `default` | Default | Nothing. 55 of 62 sessions here, and a pill on every row is a pill nobody reads. |
+| `assisted` | Assisted permissions | A quiet outlined pill. |
+| `autoApprove` | **Allow all** | An amber pill. |
+| `autopilot` | Autopilot (Preview) | An amber pill. |
+| anything else | — | The raw value, in the quiet style. |
+
+Labels come from the workbench's own strings, resolved out of `nls.messages.json` rather than guessed. `autoApprove` is the one that catches people: the picker calls it **Allow all**, so a pill reading "Auto-approve" would disagree with the thing the user actually clicked.
+
+The loud/quiet split does **not** come from the `elevated` flag — `c7o()` sets that on all three non-default levels. It comes from the risk map beside it, which scores `assisted` 1 and the other two 2. That matches what they do: assisted puts an LLM judge in front of every tool call and only auto-runs what the judge approves, while the other two auto-approve everything.
+
+That last row is deliberate. An unrecognised level is kept verbatim rather than folded into `default`, so a level added upstream shows up as an unfamiliar pill instead of silently reading as the safe one. The legacy spellings `manual` and `allowAll` are mapped, matching the workbench's own migration.
+
+**The pill is what the next request will run as, not what past ones ran as.** One session here sits at `autopilot` while its only completed request ran at `default` — the picker moved afterwards. Per-request history lives at `requests[].modeInfo.permissionLevel`, and only 10 of 177 request records put it inside the 2 KB prefix cap: median offset 3227 bytes, worst 114 KB. Reading it for the list means reading whole request payloads, which is the exact thing the cap exists to prevent. If it is ever wanted, it belongs in `sessionContent.ts` on demand.
+
+`npm run probe` prints the distribution, so a parse that stops finding levels is visible without opening VS Code.
+
+### What the pill deliberately does not cover
+
+The picker is one of several ways a session ends up auto-approving things, and it is the only one that reaches disk. Asked and answered, so nobody re-derives it:
+
+| Action | Lands in | Readable |
+|---|---|---|
+| Picker → Allow all / Autopilot / Assisted | `inputState.permissionLevel` in the session file | Yes — this is the pill |
+| **Allow All Commands in this Session** | `terminalChatService._sessionAutoApprovalEnabled`, an in-memory `Map` | No |
+| **Allow `git …` in this Session** | `_sessionAutoApproveRules`, same story | No |
+| Allow … in this Workspace / Always Allow | the `chat.tools.terminal.autoApprove` setting | Yes, but it is global rather than per-session |
+| **Enable Auto Approve…** | `chat.tools.terminal.autoApprove.warningAccepted`, `StorageScope.APPLICATION` | By inspection, yes. Not from an extension, and one value for the whole install — see below |
+
+The two session-scoped ones are in-memory only and go when the window reloads. That is deliberate on the workbench's part: `terminalChat.toolSessionMappings` is persisted through `_storageService.store` a few lines above them in the same class, and these two are not.
+
+There is a trace after the event, and it is **one-way — do not build on it**. The confirmation writes its outcome into the request payload as `autoApproveInfo`, so `"All commands will be auto approved for this session"` is greppable, 13 occurrences across 8 sessions here. Nothing records the state being turned off:
+
+- the Disable link runs `setChatSessionAutoApproval(resource, false)`, which only deletes a key from an in-memory `Map`
+- tool invocations are appended and never rewritten. Across all 62 session files the only `kind:1` patches are token counts, `modelState`, `result`, `elapsedMs`, `followups`, `copilotCredits`, `outputBuffer`, `responseMarkdownInfo`, `contentReferences`, the `inputState` fields and `customTitle`. `autoApproveInfo` is not among them
+- no retraction-shaped string appears in any session file
+- the usual way out is a window reload, which clears the map and writes nothing
+
+Reading the state back from later invocations does not save it. One session here has 94 terminal invocations after the marker and 78 session-approval hits, and that gap is explained equally well by commands matching a settings rule or being denied. A badge built on this would keep accusing a session you disabled weeks ago, with no way to clear it, which is worse than showing nothing.
+
+The settings levers are the two-way ones: `chat.tools.terminal.enableAutoApprove` and the `chat.tools.terminal.autoApprove` rules are real configuration, readable live and reflecting an edit in both directions. They are window and user/workspace scoped, so they belong in the settings panel rather than on a row.
+
+### Retrieving warningAccepted anyway
+
+It can be read, read-only, two ways — worth writing down because "you can't get it" is wrong and someone will find it:
+
+| Path | What is there |
+|---|---|
+| `globalStorage/state.vscdb` | the SQLite table leaf stores the key immediately followed by its value, so a byte scan finds `…warningAccepted` then `true` |
+| `sync/globalState/lastSyncglobalState.json` | plain JSON: `{"version":1,"value":"true","scope":0}` |
+
+Neither belongs in the extension. The value is application-scoped, so every row in the list reads the same thing and it cannot tell one session from another. `state.vscdb` is the file this project already refuses to touch behind the workbench's back, and a byte scan of a live database is at the mercy of page moves and a `-wal` that may hold a newer value. The sync file exists only with Settings Sync switched on and caches the last sync rather than the present.
+
+There is a trap in searching session files for the string. It matches chats that merely *discuss* the flag. Two sessions here contain it: one has 32 hits and genuine approval markers, the other has a single hit inside a PowerShell command typed while researching it and no approval anywhere. The string tracks who typed the flag name, not the state — the per-session evidence is `autoApproveInfo`, and that is the one-way trace above.
+
+`enableAutoApprove` is **not** a readable stand-in for `warningAccepted`, tempting as it looks. Whether the terminal tool may auto-approve is an `AND` of three things — the tool being eligible, `enableAutoApprove === true`, and `warningAccepted` — and only the middle one is reachable from an extension. The config-change listener runs one way: setting `enableAutoApprove` to anything but `true` deletes `warningAccepted`, and nothing sets it. So `false` proves auto-approve is off, while `true` proves nothing at all. Since the setting is registered `default: true`, `true` is also what almost every machine reports. The negative is provable and the positive never is, which is the wrong way round for a warning.
+
 ## Navigation spike
 
 Set `CHAT_TAGS_SPIKE_OUT` to a file path and the extension walks both ladders headlessly, writes a JSON report and closes the window.

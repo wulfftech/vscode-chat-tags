@@ -47,12 +47,14 @@ for (const dir of dirs) {
 const elapsed = Date.now() - started;
 
 const bySource = {};
+const levels = {};
 const states = { active: 0, recent: 0, idle: 0 };
 let parseErrors = 0;
 let bytes = 0;
 
 for (const session of all) {
 	bySource[session.titleSource] = (bySource[session.titleSource] ?? 0) + 1;
+	levels[session.permissionLevel] = (levels[session.permissionLevel] ?? 0) + 1;
 	bytes += session.fileSize;
 	if (session.parseError) {
 		parseErrors++;
@@ -68,6 +70,7 @@ console.log(`hidden (never used) : ${all.length - kept.length}`);
 console.log(`parse errors        : ${parseErrors}`);
 console.log(`title sources       : ${JSON.stringify(bySource)}`);
 console.log(`activity states     : ${JSON.stringify(states)}`);
+console.log(`permission levels   : ${JSON.stringify(levels)}`);
 console.log(`bytes on disk       : ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 console.log(`scan time           : ${elapsed} ms (two full passes)`);
 

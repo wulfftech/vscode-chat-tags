@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { scanSessionDeltas } from './deltaScan';
+import { normalisePermissionLevel } from './permissions';
 
 // session files are append-structured jsonl — a kind:0 snapshot then patch records
 // the snapshot goes stale immediately, so titles and counts come from the patch log
@@ -25,6 +26,9 @@ export interface ChatSessionInfo {
 	requestCount: number;
 	// no requests and no title — opened but never used
 	isEmpty: boolean;
+	// what the next request in this session will run as, not what past ones ran as — the
+	// per-request level sits past the delta scan's prefix cap and is not worth the read
+	permissionLevel: string;
 	filePath: string;
 	fileSize: number;
 	parseError?: string;
@@ -76,6 +80,7 @@ interface HeaderFields {
 	firstRequestText?: string;
 	createdAt: number;
 	requestCount: number;
+	permissionLevel?: string;
 	parseError?: string;
 }
 
@@ -111,7 +116,8 @@ export function parseSessionHeader(line: string): HeaderFields {
 			customTitle: custom || undefined,
 			firstRequestText: firstRequestText(header),
 			createdAt: typeof header.creationDate === 'number' ? header.creationDate : 0,
-			requestCount: Array.isArray(header.requests) ? header.requests.length : 0
+			requestCount: Array.isArray(header.requests) ? header.requests.length : 0,
+			permissionLevel: normalisePermissionLevel(header.inputState?.permissionLevel)
 		};
 	} catch (error) {
 		return {
@@ -161,6 +167,9 @@ export async function readSession(filePath: string): Promise<ChatSessionInfo> {
 		lastActivityAt: stat.mtimeMs,
 		requestCount,
 		isEmpty: requestCount === 0 && titleSource === 'fallback',
+		// unlike the title, the header value here is live at creation and only goes stale
+		// once the picker moves, which is exactly what the delta carries
+		permissionLevel: deltas.permissionLevel ?? header.permissionLevel ?? 'default',
 		filePath,
 		fileSize: stat.size,
 		parseError: header.parseError

@@ -24,6 +24,8 @@ export function loadContent() {
 		categoryId: entry.category,
 		requestCount: entry.requestCount ?? 0,
 		activity: entry.activity ?? 'idle',
+		// absent on a default session, exactly as the provider posts it
+		permissionLevel: entry.permissionLevel,
 		generating: Boolean(entry.generating),
 		archived: Boolean(entry.archived),
 		needsAttention: Boolean(entry.unread),

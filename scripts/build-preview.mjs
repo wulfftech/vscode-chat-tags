@@ -9,6 +9,10 @@ const { categories, models, sessions } = loadContent();
 const css = fs.readFileSync('media/view.css', 'utf8');
 const js = fs.readFileSync('media/view.js', 'utf8');
 
+// stock dark+/light+ values, read off the workbench's own colour registry. warningForeground
+// is null in both, so it stays undefined and the css falls back the way the real webview
+// does — without these the armed button and the elevated pill both paint focus-blue here
+// and the harness quietly disagrees with the product
 const THEMES = {
 	dark: {
 		'--vscode-foreground': '#cccccc',
@@ -22,6 +26,8 @@ const THEMES = {
 		'--vscode-button-secondaryForeground': '#cccccc',
 		'--vscode-button-secondaryHoverBackground': '#3c3c3c',
 		'--vscode-focusBorder': '#0078d4',
+		'--vscode-inputValidation-warningBackground': '#352A05',
+		'--vscode-inputValidation-warningBorder': '#B89500',
 		page: '#181818'
 	},
 	light: {
@@ -36,6 +42,8 @@ const THEMES = {
 		'--vscode-button-secondaryForeground': '#3b3b3b',
 		'--vscode-button-secondaryHoverBackground': '#dcdcdc',
 		'--vscode-focusBorder': '#005fb8',
+		'--vscode-inputValidation-warningBackground': '#F6F5D2',
+		'--vscode-inputValidation-warningBorder': '#B89500',
 		page: '#f8f8f8'
 	}
 };

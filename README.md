@@ -49,6 +49,21 @@ First run stamps a baseline timestamp. Without it every session you've ever open
 
 Colour attaches to the category, not the chat. Inside a webview colours are plain CSS, which answers to nobody's palette rules. Twelve curated ones plus a custom hex field.
 
+## Which sessions can run things without asking
+
+VS Code lets you set a permission level per chat. Most people set it once, forget which chats they set it on, and then wonder why one of them is merrily running commands.
+
+A row that isn't on the default level gets a small pill next to its title. That's it. Nothing shows on the default level, because a badge that appears on every row is wallpaper.
+
+| Pill | What it means |
+|---|---|
+| **Allow all** or **Autopilot** | Amber. This chat auto-approves every tool call. |
+| **Assisted** | Quiet grey. An LLM judge vets each tool call, and anything it won't approve still comes to you. |
+
+The pill reads the level out of the session file, so it costs nothing and it's right even for chats you set up months ago and haven't opened since.
+
+One honest limit: it shows what the **next** message in that chat will run as, not what the old ones ran as. Change the level today and the pill changes today, even though yesterday's messages ran under the old one.
+
 ## Ordering and grouping
 
 Two orders, in the sort menu:

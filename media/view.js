@@ -521,6 +521,41 @@
 		return button;
 	}
 
+	// only non-default sessions arrive with a level, so the presence of one is the whole
+	// decision. labels and hints are the workbench's own copy — 'autoApprove' is called
+	// Allow all in the picker, and a pill that disagrees with the thing the user clicked
+	// is worse than no pill
+	const PERMISSION_PILLS = {
+		assisted: {
+			label: 'Assisted',
+			hint: "An LLM judge evaluates each tool call. Tools it doesn't approve require your approval."
+		},
+		autoApprove: {
+			label: 'Allow all',
+			hint: 'Auto-approves every tool call and retries on errors.'
+		},
+		autopilot: {
+			label: 'Autopilot',
+			hint: 'Auto-approves every tool call and continues until the task is done.'
+		}
+	};
+
+	// the workbench marks all three non-default levels elevated, so that flag cannot drive
+	// the split. its risk map scores assisted 1 and the other two 2, which can — assisted
+	// still puts a judge in front of every call, the other two put nothing
+	const LOUD = ['autoApprove', 'autopilot'];
+
+	function permissionPill(level) {
+		const known = PERMISSION_PILLS[level];
+		// a level added upstream lands here unrecognised — showing it raw beats treating
+		// an unfamiliar permission as if it were the safe one
+		const pill = el('span', 'pill', known ? known.label : level);
+		pill.dataset.level = level;
+		pill.dataset.elevated = String(LOUD.includes(level));
+		pill.title = known ? known.hint : 'Permission level ' + level + ', which this version does not recognise.';
+		return pill;
+	}
+
 	function buildRow(session, now) {
 		const category = state.categories.find(c => c.id === session.categoryId);
 		const row = el('li', 'row');
@@ -560,6 +595,9 @@
 			startEdit(row, session, 'title');
 		});
 		top.appendChild(title);
+		if (session.permissionLevel) {
+			top.appendChild(permissionPill(session.permissionLevel));
+		}
 
 		const titleEdit = el('button', 'edit');
 		titleEdit.appendChild(icon('pencil'));

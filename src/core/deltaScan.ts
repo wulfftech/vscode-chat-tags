@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { normalisePermissionLevel } from './permissions';
 
 // after the kind:0 header every line is a patch record:
 //   {"kind":1,"k":["customTitle"],"v":"..."}  set value at path k
@@ -18,6 +19,8 @@ export interface DeltaScanResult {
 	appendedRequests: number;
 	// byte cap stopped us early, so counts are a lower bound
 	truncated: boolean;
+	// last value the permission picker was moved to, absent if it never moved
+	permissionLevel?: string;
 }
 
 const RECORD_HEAD = /^\{"kind":(\d+),"k":\[([^\]]*)\]/;
@@ -68,6 +71,15 @@ function consider(line: string, result: DeltaScanResult): void {
 			if (text && text.trim()) {
 				result.firstInputText = text.trim();
 			}
+		}
+		return;
+	}
+
+	if (kind === 1 && path.length === 2 && path[0] === 'inputState' && path[1] === 'permissionLevel') {
+		// later records win — the picker can be moved any number of times in one session
+		const level = normalisePermissionLevel(stringValueOf(line));
+		if (level) {
+			result.permissionLevel = level;
 		}
 		return;
 	}

@@ -6,6 +6,7 @@
     "    node scripts/build-screenshot.mjs   (media/screenshot.png)",
     "Keep the '_shows' notes in mind — each row is in the shot to demonstrate something.",
     "Room at 340px pane width: title ~45 chars before it ellipsizes, subtitle ~50.",
+    "A session off the default permission level carries 'permissionLevel' — its pill costs the title about 12 of those characters.",
     "'_shows' and '_readme' are ignored by both builders. Everything else is rendered.",
     "",
     "'panes' maps a pane id to the sessions that pane draws, so no two frames of the shot",
@@ -191,6 +192,7 @@
     {
       "_shows": "grouped: uncategorised — falls under the Uncategorised heading.",
       "id": "g6",
+      "permissionLevel": "autopilot",
       "title": "Risk Register — Worst Case",
       "subtitle": "Worst-case Ontario",
       "subtitleSource": "manual",
@@ -631,6 +633,7 @@
     {
       "_shows": "buttons pane: fills the space below the hovered row.",
       "id": "b6",
+      "permissionLevel": "assisted",
       "title": "Legal Representation Options",
       "subtitle": "It's the Constitution, it's Mabo",
       "subtitleSource": "llm",
@@ -654,6 +657,7 @@
     {
       "_shows": "buttons pane: tail row.",
       "id": "b8",
+      "permissionLevel": "autoApprove",
       "title": "Sanitation Department Proposal",
       "subtitle": "Can't someone else do it?",
       "subtitleSource": "llm",

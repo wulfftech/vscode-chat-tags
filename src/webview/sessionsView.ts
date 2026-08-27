@@ -4,6 +4,7 @@ import { ChatSessionInfo, activityStateOf, compareSessions, listSessions } from 
 import { PALETTE, TagStore } from '../model/categories';
 import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
 import { deleteSession, newSession, openSession } from '../navigation';
+import { isDefaultPermission } from '../core/permissions';
 import { GenerationMode } from '../core/subtitleText';
 import { SubtitleService } from '../subtitles';
 
@@ -31,6 +32,9 @@ interface RenderedSession {
 	needsAttention: boolean;
 	generating: boolean;
 	archived: boolean;
+	// absent on a default session, so the common row carries nothing extra and the view
+	// has no decision to make about whether to draw the pill
+	permissionLevel?: string;
 }
 
 function nonce(): string {
@@ -147,7 +151,10 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				categoryId: meta.categoryId,
 				needsAttention: this.tags.needsAttention(session.sessionId, session.lastActivityAt),
 				generating: inFlight.has(session.sessionId),
-				archived: Boolean(meta.archivedAt)
+				archived: Boolean(meta.archivedAt),
+				permissionLevel: isDefaultPermission(session.permissionLevel)
+					? undefined
+					: session.permissionLevel
 			};
 		});
 
