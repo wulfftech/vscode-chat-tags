@@ -545,6 +545,17 @@
 	// still puts a judge in front of every call, the other two put nothing
 	const LOUD = ['autoApprove', 'autopilot'];
 
+	// the session button leaves no flag to read — this pill comes from watching the session
+	// file for commands it auto-approved, so it means "as of the last terminal command",
+	// and it goes when the window reloads because the workbench state goes with it
+	function sessionApprovalPill() {
+		const pill = el('span', 'pill', 'Auto-approving');
+		pill.dataset.elevated = 'true';
+		pill.dataset.live = 'true';
+		pill.title = 'Allow All Commands in this Session is on — terminal commands run without asking. It clears when the window reloads.';
+		return pill;
+	}
+
 	function permissionPill(level) {
 		const known = PERMISSION_PILLS[level];
 		// a level added upstream lands here unrecognised — showing it raw beats treating
@@ -595,6 +606,9 @@
 			startEdit(row, session, 'title');
 		});
 		top.appendChild(title);
+		if (session.autoApproving) {
+			top.appendChild(sessionApprovalPill());
+		}
 		if (session.permissionLevel) {
 			top.appendChild(permissionPill(session.permissionLevel));
 		}

@@ -62,6 +62,10 @@ A row that isn't on the default level gets a small pill next to its title. That'
 
 The pill reads the level out of the session file, so it costs nothing and it's right even for chats you set up months ago and haven't opened since.
 
+There's a second pill, **Auto-approving**, for the other way a chat ends up running commands unattended: the **Allow All Commands in this Session** button in a terminal prompt. That one is worth calling out because VS Code keeps it nowhere — it lives in memory, it vanishes when the window reloads, and nothing on disk says it was switched off. Chat Tags works it out by watching what the chat actually does: a command that ran without asking puts the pill up, and the next one that had to ask takes it down.
+
+If your machine has the auto-approve permission levels locked out by policy, that button is the only route left, and this pill is the only warning you get.
+
 One honest limit: it shows what the **next** message in that chat will run as, not what the old ones ran as. Change the level today and the pill changes today, even though yesterday's messages ran under the old one.
 
 ## Ordering and grouping

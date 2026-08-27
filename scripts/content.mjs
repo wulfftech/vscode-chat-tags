@@ -26,6 +26,7 @@ export function loadContent() {
 		activity: entry.activity ?? 'idle',
 		// absent on a default session, exactly as the provider posts it
 		permissionLevel: entry.permissionLevel,
+		autoApproving: Boolean(entry.autoApproving),
 		generating: Boolean(entry.generating),
 		archived: Boolean(entry.archived),
 		needsAttention: Boolean(entry.unread),

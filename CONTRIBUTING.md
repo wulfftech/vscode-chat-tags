@@ -271,6 +271,36 @@ Reading the state back from later invocations does not save it. One session here
 
 The settings levers are the two-way ones: `chat.tools.terminal.enableAutoApprove` and the `chat.tools.terminal.autoApprove` rules are real configuration, readable live and reflecting an edit in both directions. They are window and user/workspace scoped, so they belong in the settings panel rather than on a row.
 
+### Detecting live session approval
+
+The one route the pill cannot see is "Allow All Commands in this Session", and on a machine where policy blocks the elevated picker levels it is the only route left. `ChatToolsAutoApprove: false` makes `t_e()` return false so the picker levels do nothing, while `ChatToolsTerminalEnableAutoApprove` stays true — and the session path checks only the latter:
+
+```js
+if (configurationService.getValue("chat.tools.terminal.enableAutoApprove") === true
+    && e.chatSessionResource
+    && terminalChatService.hasChatSessionAutoApproval(e.chatSessionResource)) { … }
+```
+
+`sessionApproval.ts` reads it out of the file instead of the unreachable Map. Three things make that work:
+
+**The marker is a command id, not a sentence.** `workbench.action.terminal.chat.disableSessionAutoApproval` is baked into the `autoApproveInfo` of every command that button auto-approves. The English text beside it is an nls entry and changes with the display language; the id does not. It appears in exactly the 8 sessions here that used the button and none of the other 54.
+
+**Liveness comes from the activation baseline.** The workbench's map is per-window and the extension host restarts with the window, so anything written before this process started belongs to a window that is gone. The tracker records each file's size on the first pass without reading it, and only bytes appended after that can set the flag.
+
+**The off-edge is an absence.** Clicking Disable writes nothing, but the next terminal command then records no marker, so a `run_in_terminal` with no marker ahead of it clears the flag. Both edges are observable inside one window's life. Of the 8 sessions here, 5 end approved and 3 end stopped, so the machine flips both ways on real data.
+
+Two details the implementation depends on, both measured rather than assumed. The marker sits *before* the toolId of its own invocation — the interleaving reads `MMTMMT…`, two markers per command — so a toolId closes a window and is judged on what preceded it. And a single appended record holds up to 170 terminal invocations here, which is why the scan is an ordered pass over bytes rather than anything line-shaped.
+
+Cost is the size of the delta, not the session: files are append-only, so the tracker keeps a byte offset and only advances it to a record boundary, leaving a half-written line to be re-read. Median append is 70 bytes, p90 12 KB, p99 317 KB, with one 23 MB outlier. Nothing is parsed and no content is extracted — it is a fixed-string search for two ids.
+
+Known limits, all accepted:
+
+- clicking Disable and running nothing further leaves the pill up until the next command or a reload. It over-warns, which is the right direction for a safety badge
+- a session approved in another window flags here too. It genuinely is auto-approving, just not in this window's map
+- with no policy in the way, an elevated picker level filters the session analyzer out entirely (`Si = it ? analyzers.filter(z => !(z instanceof ZEe)) : analyzers`), so the marker never appears. The permission pill covers that case, which is why the two indicators are complementary rather than redundant
+
+`npm run probe` reports the distribution. It scans from the top rather than from a baseline, so it reports history rather than liveness — enough to prove the marker still parses out of real files.
+
 ### Retrieving warningAccepted anyway
 
 It can be read, read-only, two ways — worth writing down because "you can't get it" is wrong and someone will find it:

@@ -5,6 +5,7 @@ import { PALETTE, TagStore } from '../model/categories';
 import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
 import { deleteSession, newSession, openSession } from '../navigation';
 import { isDefaultPermission } from '../core/permissions';
+import { SessionApprovalTracker } from '../core/sessionApproval';
 import { GenerationMode } from '../core/subtitleText';
 import { SubtitleService } from '../subtitles';
 
@@ -35,6 +36,10 @@ interface RenderedSession {
 	// absent on a default session, so the common row carries nothing extra and the view
 	// has no decision to make about whether to draw the pill
 	permissionLevel?: string;
+	// "Allow All Commands in this Session" is live for this chat, as of the last terminal
+	// command it ran. the picker level says nothing about this one — under a policy that
+	// blocks the elevated levels it is the only route left
+	autoApproving?: boolean;
 }
 
 function nonce(): string {
@@ -51,6 +56,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 
 	private view?: vscode.WebviewView;
 	private sessions: ChatSessionInfo[] = [];
+	private readonly approvals = new SessionApprovalTracker();
 	private timer?: NodeJS.Timeout;
 	// which row draws as selected. the pane cannot read editor focus — a chat editor
 	// reaches the tabs api as TabInputKind.Unknown, so tab.input is undefined and carries
@@ -97,6 +103,9 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	async refresh(): Promise<void> {
 		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir)));
 		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+		// the first pass only records where the files already ended — see the tracker for
+		// why anything written before this window started cannot be read as live
+		await this.approvals.update(this.sessions);
 		this.adoptNewSession();
 		this.post();
 	}
@@ -154,7 +163,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				archived: Boolean(meta.archivedAt),
 				permissionLevel: isDefaultPermission(session.permissionLevel)
 					? undefined
-					: session.permissionLevel
+					: session.permissionLevel,
+				autoApproving: this.approvals.isApproving(session.sessionId) || undefined
 			};
 		});
 

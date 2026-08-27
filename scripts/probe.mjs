@@ -11,6 +11,7 @@ import * as path from 'node:path';
 const require = createRequire(import.meta.url);
 const { listSessions, activityStateOf, compareSessions } = require('../out/core/sessions.js');
 const { localSessionUriString, parseLocalSessionUri } = require('../out/core/sessionUri.js');
+const { scanTail } = require('../out/core/sessionApproval.js');
 const { WORKSPACE_SESSIONS_DIRNAME, EMPTY_WINDOW_SESSIONS_DIRNAME } = require('../out/core/locations.js');
 
 const userDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User');
@@ -71,6 +72,17 @@ console.log(`parse errors        : ${parseErrors}`);
 console.log(`title sources       : ${JSON.stringify(bySource)}`);
 console.log(`activity states     : ${JSON.stringify(states)}`);
 console.log(`permission levels   : ${JSON.stringify(levels)}`);
+
+// scanned from the top rather than from an activation baseline, so this reports history
+// rather than liveness — enough to prove the marker still parses out of real files
+const approval = { approving: 0, stopped: 0, noTerminal: 0 };
+for (const session of all) {
+	const scan = await scanTail(session.filePath, 0);
+	if (scan.approving === true) { approval.approving++; }
+	else if (scan.approving === false) { approval.stopped++; }
+	else { approval.noTerminal++; }
+}
+console.log(`session approval    : ${JSON.stringify(approval)}`);
 console.log(`bytes on disk       : ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 console.log(`scan time           : ${elapsed} ms (two full passes)`);
 
