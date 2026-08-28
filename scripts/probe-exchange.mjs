@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // offline check of the last-exchange reader against this machine's real sessions
 // the llm layer can't be exercised without an extension host, but everything it is fed
 // can be, so this proves the input before anything is spent generating from it

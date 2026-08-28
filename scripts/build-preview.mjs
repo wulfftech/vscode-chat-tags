@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // inlines the real media/view.css and media/view.js into a standalone page so the
 // webview can be eyeballed outside VS Code. inlining rather than linking because the
 // preview renders as a snapshot and relative asset paths don't resolve there.

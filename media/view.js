@@ -1,4 +1,7 @@
 // @ts-check
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 (function () {
 	const vscode = acquireVsCodeApi();
 	const root = document.getElementById('root');

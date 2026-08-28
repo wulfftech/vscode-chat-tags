@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // one source of display text for both the harness and the README screenshot, so
 // sanitising the shot doesn't leave the harness showing something else
 import * as fs from 'node:fs';

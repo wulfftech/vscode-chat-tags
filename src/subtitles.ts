@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 import * as vscode from 'vscode';
 import { readLastExchange, readOpeningMessages } from './core/sessionContent';
 import {

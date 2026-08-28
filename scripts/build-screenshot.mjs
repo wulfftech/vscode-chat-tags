@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // composes the README hero shot: four panes of the real view, two themes, with the
 // config surfaces open. renders through headless chrome rather than a hand-drawn mock,
 // so the shot can never drift from what the extension actually paints.

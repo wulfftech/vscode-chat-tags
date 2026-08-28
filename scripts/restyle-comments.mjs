@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // one-shot pass to bring comments in line with the house style: lowercase, no
 // docstrings, why-not-what. the edits list carries the current batch only — an applied
 // batch is dead weight, and one entry outliving its file takes the whole run down.

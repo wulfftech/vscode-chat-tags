@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <title>Chat Tags — view harness</title>
 <style>
+/* SPDX-License-Identifier: GPL-3.0-or-later
+   Copyright (C) 2026 WulffTech */
+
 /* row height matches the built-in chat sessions list (ITEM_HEIGHT = 54) so the two
    views sit side by side without looking like different products */
 
@@ -874,6 +877,9 @@ function mount(hostId, listSettings) {
 	window.acquireVsCodeApi = () => ({ postMessage: m => console.log(hostId, JSON.stringify(m)) });
 
 	// @ts-check
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 (function () {
 	const vscode = acquireVsCodeApi();
 	const root = document.getElementById('root');

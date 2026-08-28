@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 WulffTech
+
 # derives every icon the project ships from the one source logo
 #
 # two things the source needs before anything else uses it:

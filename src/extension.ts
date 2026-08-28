@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { ResolvedLocations, resolveSessionDirectories } from './core/locations';

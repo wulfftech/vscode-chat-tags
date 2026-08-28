@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // vs code keeps a permission level per session, written straight into the session file at
 // inputState.permissionLevel and patched there whenever the picker changes. the four
 // levels come from the workbench's own enum, which marks every non-default one elevated

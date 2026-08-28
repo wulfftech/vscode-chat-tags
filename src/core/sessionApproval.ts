@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 import * as fs from 'fs';
 
 // "Allow All Commands in this Session" is held in a Map on the workbench's terminal chat

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 /**
  * Offline check of the read model against this machine's real chat sessions.
  * Exercises the same compiled code the extension uses, minus anything vscode-shaped,

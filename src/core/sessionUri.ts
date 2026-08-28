@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 // local sessions are addressed as vscode-chat-session://local/<base64url(sessionId)>
 // mirrors the workbench's ChatSessionUri.forSession — url-safe base64, no padding,
 // session type as the authority. SessionType.Local is the string "local"

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 WulffTech
+
 import { LastExchange } from './sessionContent';
 
 // what a generation run is for. 'status' reads the end of the session, the other two

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 WulffTech
+
 # one-off look at the source logo before deriving anything from it
 Add-Type -AssemblyName System.Drawing
 
