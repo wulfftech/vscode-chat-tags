@@ -15,6 +15,10 @@ import { SubtitleService } from '../subtitles';
 // activity is time-based, so the view has to repaint even when nothing on disk moved
 const REPAINT_INTERVAL_MS = 20_000;
 
+// long enough that a run of appends from one live chat collapses into a single scan,
+// short enough that a new session still appears while the user is looking for it
+const REFRESH_DEBOUNCE_MS = 400;
+
 // how long a chat started from the + button stays eligible to claim the selection. a new
 // chat reaches disk only when its first message lands, and that is however long the user
 // takes to type it
@@ -70,6 +74,11 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	private awaitingNewSession = false;
 	private knownBeforeNewChat = new Set<string>();
 	private awaitingUntil = 0;
+	// the watcher fires once per append, and an active chat appends constantly. these
+	// hold the storm to one scan at a time with at most one more queued behind it
+	private refreshTimer?: NodeJS.Timeout;
+	private refreshing = false;
+	private refreshQueued = false;
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
@@ -96,14 +105,62 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				clearInterval(this.timer);
 				this.timer = undefined;
 			}
+			if (this.refreshTimer) {
+				clearTimeout(this.refreshTimer);
+				this.refreshTimer = undefined;
+			}
 			this.view = undefined;
 		});
 
-		this.timer = setInterval(() => this.post(), REPAINT_INTERVAL_MS);
+		// a hidden pane has nothing to repaint, and the repaint walks every session
+		view.onDidChangeVisibility(() => {
+			if (view.visible) {
+				this.post();
+			}
+		});
+
+		this.timer = setInterval(() => {
+			if (this.view?.visible) {
+				this.post();
+			}
+		}, REPAINT_INTERVAL_MS);
 		await this.refresh();
 	}
 
+	// what the file watcher asks for. a burst of appends collapses into one scan rather
+	// than one scan apiece, each of which used to walk the whole store
+	scheduleRefresh(): void {
+		if (this.refreshTimer) {
+			return;
+		}
+		this.refreshTimer = setTimeout(() => {
+			this.refreshTimer = undefined;
+			void this.refresh();
+		}, REFRESH_DEBOUNCE_MS);
+	}
+
 	async refresh(): Promise<void> {
+		// a refresh arriving mid-scan used to start a second full fan-out over the store
+		// on top of the first, which is how a large store took the extension host down
+		if (this.refreshing) {
+			this.refreshQueued = true;
+			return;
+		}
+		this.refreshing = true;
+		try {
+			await this.scan();
+			if (this.refreshQueued) {
+				// whatever landed while we were reading is worth exactly one more pass
+				this.refreshQueued = false;
+				await this.scan();
+			}
+		} finally {
+			this.refreshing = false;
+			this.refreshQueued = false;
+		}
+	}
+
+	private async scan(): Promise<void> {
 		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir)));
 		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 		// the first pass only records where the files already ended — see the tracker for

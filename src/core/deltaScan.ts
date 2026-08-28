@@ -14,6 +14,7 @@ import { normalisePermissionLevel } from './permissions';
 
 const PREFIX_BYTES = 2048;
 const DEFAULT_MAX_SCAN_BYTES = 4 * 1024 * 1024;
+const CHUNK_BYTES = 256 * 1024;
 
 export interface DeltaScanResult {
 	customTitle?: string;
@@ -40,15 +41,44 @@ function stringValueOf(line: string): string | undefined {
 	} catch {
 		// truncated by the prefix cap — recover the value with a narrower match
 		const match = /"v":"((?:[^"\\]|\\.)*)"/.exec(line);
-		if (!match) {
+		if (match) {
+			try {
+				return JSON.parse(`"${match[1]}"`);
+			} catch {
+				return undefined;
+			}
+		}
+		// the cap can also land inside the value, leaving no closing quote to match. what
+		// is there still beats nothing: every caller uses this as a title, and a title is
+		// cut to its first line before anyone sees it
+		const open = /"v":"((?:[^"\\]|\\.)*)$/.exec(line);
+		if (!open) {
 			return undefined;
 		}
 		try {
-			return JSON.parse(`"${match[1]}"`);
+			// a cut landing mid-escape leaves a lone backslash, which is not parseable
+			return JSON.parse(`"${open[1]!.replace(/\\+$/, '')}"`);
 		} catch {
 			return undefined;
 		}
 	}
+}
+
+// the prefix cap can land inside a multi-byte character, and decoding a half character
+// yields a replacement one. so the cut is walked back to the last complete character —
+// which is also the whole of the corruption that used to happen at every chunk boundary,
+// back when a chunk was decoded before its records were found
+function completeBytes(view: Buffer): number {
+	const end = view.length;
+	for (let back = 0; back < 4 && back < end; back++) {
+		const byte = view[end - 1 - back]!;
+		if ((byte & 0xC0) === 0x80) {
+			continue; // continuation byte, keep walking back to the lead
+		}
+		const needed = byte < 0x80 ? 1 : byte < 0xE0 ? 2 : byte < 0xF0 ? 3 : 4;
+		return back + 1 >= needed ? end : end - back - 1;
+	}
+	return end;
 }
 
 function consider(line: string, result: DeltaScanResult): void {
@@ -102,51 +132,56 @@ export async function scanSessionDeltas(
 
 	const handle = await fs.promises.open(filePath, 'r');
 	try {
-		const chunkSize = 256 * 1024;
-		const buffer = Buffer.alloc(chunkSize);
+		// allocUnsafe on both: read() overwrites every byte it reports, and the prefix is
+		// only ever read as far as prefixLength. zero-filling a quarter megabyte per file
+		// is pure waste across a store of several hundred
+		const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
+		// the head of the record being assembled. a request append carries its whole
+		// payload, hundreds of kb of it, and none of that is wanted — so bytes past the
+		// cap are stepped over rather than kept, and never become a string
+		const prefix = Buffer.allocUnsafe(PREFIX_BYTES);
+		let prefixLength = 0;
 		let position = 0;
-		let pending = '';
 		let firstLineSkipped = false;
 
 		while (position < maxScanBytes) {
-			const { bytesRead } = await handle.read(buffer, 0, chunkSize, position);
+			const { bytesRead } = await handle.read(buffer, 0, CHUNK_BYTES, position);
 			if (bytesRead === 0) {
 				break;
 			}
+			const chunk = buffer.subarray(0, bytesRead);
 			position += bytesRead;
-			pending += buffer.subarray(0, bytesRead).toString('utf8');
 
-			let newlineIndex: number;
-			while ((newlineIndex = pending.indexOf('\n')) !== -1) {
-				const line = pending.slice(0, newlineIndex);
-				pending = pending.slice(newlineIndex + 1);
+			let cursor = 0;
+			while (cursor < bytesRead) {
+				// the record boundary is found as a byte. decoding a chunk to look for a
+				// newline turns every megabyte of payload into a throwaway js string, and
+				// that was most of the cost of a scan and all of its gc pressure
+				const newline = chunk.indexOf(0x0A, cursor);
+				const end = newline === -1 ? bytesRead : newline;
+				if (prefixLength < PREFIX_BYTES) {
+					const take = Math.min(end - cursor, PREFIX_BYTES - prefixLength);
+					chunk.copy(prefix, prefixLength, cursor, cursor + take);
+					prefixLength += take;
+				}
+				if (newline === -1) {
+					break;
+				}
 				if (!firstLineSkipped) {
 					firstLineSkipped = true; // kind:0 header is parsed elsewhere
-					continue;
+				} else if (prefixLength > 0) {
+					consider(decodePrefix(prefix, prefixLength), result);
 				}
-				consider(line, result);
-			}
-
-			// keep only enough of an unterminated line to identify it
-			if (pending.length > PREFIX_BYTES) {
-				const head = pending.slice(0, PREFIX_BYTES);
-				consider(head, result);
-				// drop the rest rather than buffering 10mb of request payload
-				const nextNewline = pending.indexOf('\n');
-				pending = nextNewline === -1 ? '' : pending.slice(nextNewline + 1);
-				if (nextNewline === -1) {
-					// skip ahead to the next newline
-					const skipped = await skipToNextLine(handle, position, maxScanBytes);
-					position = skipped.position;
-					pending = skipped.remainder;
-				}
+				prefixLength = 0;
+				cursor = newline + 1;
 			}
 		}
 
 		if (position >= maxScanBytes) {
 			result.truncated = true;
-		} else if (pending && firstLineSkipped) {
-			consider(pending.slice(0, PREFIX_BYTES), result);
+		} else if (prefixLength > 0 && firstLineSkipped) {
+			// a file that does not end on a newline still has a record worth reading
+			consider(decodePrefix(prefix, prefixLength), result);
 		}
 	} finally {
 		await handle.close();
@@ -155,26 +190,7 @@ export async function scanSessionDeltas(
 	return result;
 }
 
-// advances past the remainder of an over-long line, returning any text after it
-async function skipToNextLine(
-	handle: fs.promises.FileHandle,
-	position: number,
-	maxScanBytes: number
-): Promise<{ position: number; remainder: string }> {
-	const chunkSize = 256 * 1024;
-	const buffer = Buffer.alloc(chunkSize);
-
-	while (position < maxScanBytes) {
-		const { bytesRead } = await handle.read(buffer, 0, chunkSize, position);
-		if (bytesRead === 0) {
-			return { position, remainder: '' };
-		}
-		position += bytesRead;
-		const text = buffer.subarray(0, bytesRead).toString('utf8');
-		const newlineIndex = text.indexOf('\n');
-		if (newlineIndex !== -1) {
-			return { position, remainder: text.slice(newlineIndex + 1) };
-		}
-	}
-	return { position, remainder: '' };
+function decodePrefix(prefix: Buffer, length: number): string {
+	const view = prefix.subarray(0, length);
+	return view.subarray(0, completeBytes(view)).toString('utf8');
 }

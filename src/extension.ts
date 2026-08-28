@@ -85,7 +85,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		const watcher = vscode.workspace.createFileSystemWatcher(
 			new vscode.RelativePattern(vscode.Uri.file(dir), '*.jsonl')
 		);
-		const onChange = () => { void provider.refresh(); };
+		// debounced rather than immediate: a live chat appends to its session file
+		// continuously, and each append is a watcher event
+		const onChange = () => { provider.scheduleRefresh(); };
 		watcher.onDidCreate(onChange, undefined, context.subscriptions);
 		watcher.onDidChange(onChange, undefined, context.subscriptions);
 		watcher.onDidDelete(onChange, undefined, context.subscriptions);

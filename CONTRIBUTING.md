@@ -53,6 +53,22 @@ Measured across 49 real sessions, 94 MB on disk:
 
 `npm run probe` prints how many positions the activity order and the created order agree on. Expect roughly a third, and expect the exact number to move — it is measured against live session files, and using a chat changes its mtime. Don't paste that figure into the docs as a fixed fact.
 
+### Scan cost on a large store
+
+A store is not always this machine's 66 files and 113 MB. A report from a 614-file, 3 GB store had the extension host dying four times in 22 minutes, with 83% of a CPU profile in one function. Five things were wrong and they compounded.
+
+**Finding a record boundary is a byte search.** The scan used to decode every 256 KB chunk into a string and look for a newline in that. A request append carries its whole payload, so a session file is mostly payload, and all of it became throwaway JS strings. `Buffer.indexOf(0x0A)` answers the same question against the bytes. That change alone took the two-pass probe here from 267 ms to 102 ms, and it is the whole of the 83%.
+
+**Only the prefix is decoded.** Bytes past `PREFIX_BYTES` are stepped over rather than accumulated, so a 400 KB request record costs a byte scan of its length and 2 KB of decode. Nothing further into the record was ever wanted.
+
+**The fan-out is bounded.** `listSessions` ran `Promise.all` across the directory, so 614 files were read simultaneously, each holding a 256 KB buffer and its own transient strings. Six overlapping scans of a 96 MB store peaked at 872 MB RSS. Bounded to eight at a time, the same six peak at 100 MB.
+
+**Unchanged sessions are not re-read.** The files are append-only, so a size and mtime that both still match mean the last read still stands. Repeat scans of that store drop from ~140 ms to nothing.
+
+**The watcher is debounced and the scan is single-flight.** A live chat appends to its session file continuously and every append is a watcher event, so refreshes stacked — a second full fan-out starting on top of the first, which is what actually took the host down. Events now collapse into one scan after 400 ms, and a refresh arriving mid-scan queues exactly one more pass rather than starting its own.
+
+The old skip carried a correctness bug as well. `skipToNextLine` consumed the `kind:0` header without ever setting `firstLineSkipped`, so in any session whose header ran past a chunk boundary the *next* real record was swallowed as though it were the header. Four sessions here were wrong because of it, one reporting no request appends at all against seven on disk and losing its `autopilot` level with them. The check for that is a full read of the file rather than a comparison against the old numbers, since the old numbers were the thing under suspicion.
+
 ## Opening a session
 
 There's no public API for "open this chat session". Three ways work, tried in order:

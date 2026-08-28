@@ -131,13 +131,45 @@ export function parseSessionHeader(line: string): HeaderFields {
 	}
 }
 
+// a store of several hundred sessions used to fan out over every file at once, each
+// holding its own read buffer and its own decode. bounding it keeps peak memory flat in
+// the size of the store rather than linear in it
+const SCAN_CONCURRENCY = 8;
+
+async function mapBounded<T, R>(items: T[], limit: number, run: (item: T) => Promise<R>): Promise<R[]> {
+	const results = new Array<R>(items.length);
+	let next = 0;
+	const worker = async (): Promise<void> => {
+		for (let index = next++; index < items.length; index = next++) {
+			results[index] = await run(items[index]!);
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+	return results;
+}
+
+interface CacheEntry {
+	mtimeMs: number;
+	size: number;
+	info: ChatSessionInfo;
+}
+
+// session files are append-only, so one whose size and mtime both still match the last
+// read cannot have changed. without this every refresh re-read every session in the
+// store, and during an active chat the watcher asks for a refresh on every append
+const cache = new Map<string, CacheEntry>();
+
 // reads one session file, preferring patch-log values over the stale header
 export async function readSession(filePath: string): Promise<ChatSessionInfo> {
+	// the stat comes first and alone: on a hit it is the entire cost of the call
+	const stat = await fs.promises.stat(filePath);
+	const cached = cache.get(filePath);
+	if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+		return cached.info;
+	}
+
 	const fallbackId = path.basename(filePath).replace(/\.jsonl$/, '');
-	const [stat, headerLine] = await Promise.all([
-		fs.promises.stat(filePath),
-		readFirstLine(filePath)
-	]);
+	const headerLine = await readFirstLine(filePath);
 	const header = parseSessionHeader(headerLine);
 	const deltas = await scanSessionDeltas(filePath);
 
@@ -162,7 +194,7 @@ export async function readSession(filePath: string): Promise<ChatSessionInfo> {
 		titleSource = 'fallback';
 	}
 
-	return {
+	const info: ChatSessionInfo = {
 		sessionId: header.sessionId ?? fallbackId,
 		title,
 		titleSource,
@@ -177,6 +209,9 @@ export async function readSession(filePath: string): Promise<ChatSessionInfo> {
 		fileSize: stat.size,
 		parseError: header.parseError
 	};
+
+	cache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, info });
+	return info;
 }
 
 export interface ListOptions {
@@ -193,17 +228,29 @@ export async function listSessions(directory: string, options: ListOptions = {})
 		return [];
 	}
 
-	const sessions = await Promise.all(
-		entries
-			.filter(name => name.endsWith('.jsonl'))
-			.map(async (name): Promise<ChatSessionInfo | undefined> => {
-				try {
-					return await readSession(path.join(directory, name));
-				} catch {
-					return undefined;
-				}
-			})
-	);
+	const paths = entries
+		.filter(name => name.endsWith('.jsonl'))
+		.map(name => path.join(directory, name));
+
+	// a session deleted from under us would otherwise keep its metadata for as long as
+	// the window lives, and the pane can be open for days
+	const present = new Set(paths);
+	// derived through join so it is normalised the same way the keys are, and taken from
+	// the directory rather than the listing so an emptied one still gets swept
+	const owned = path.dirname(path.join(directory, 'x.jsonl'));
+	for (const key of cache.keys()) {
+		if (path.dirname(key) === owned && !present.has(key)) {
+			cache.delete(key);
+		}
+	}
+
+	const sessions = await mapBounded(paths, SCAN_CONCURRENCY, async (file): Promise<ChatSessionInfo | undefined> => {
+		try {
+			return await readSession(file);
+		} catch {
+			return undefined;
+		}
+	});
 
 	return sessions
 		.filter((session): session is ChatSessionInfo => session !== undefined)
