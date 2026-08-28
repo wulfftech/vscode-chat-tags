@@ -89,6 +89,84 @@ console.log(`session approval    : ${JSON.stringify(approval)}`);
 console.log(`bytes on disk       : ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 console.log(`scan time           : ${elapsed} ms (two full passes)`);
 
+// the extension never scans from zero. it resumes from the offset the previous scan
+// handed back, against a file that has grown since, and that is the loop where an
+// offset which is not a real byte position does its damage — it resumes mid-record and
+// reads a terminal command as one nothing approved. so the loop is walked rather than
+// assumed: every session is replayed as a series of appends and has to end on the same
+// verdict the single full scan reached. resuming reads only the delta, so replaying a
+// session costs about one pass over it however many steps it is cut into
+const RESUME_STEPS = 7;
+const replayFile = path.join(os.tmpdir(), `chat-tags-resume-${process.pid}.jsonl`);
+const resume = { replayed: 0, skipped: 0, misaligned: 0, mismatched: 0 };
+const resumeProblems = [];
+
+for (const session of all) {
+	const full = await scanTail(session.filePath, 0);
+
+	// an offset landing anywhere but just past a newline will resume mid-record
+	if (full.offset > 0) {
+		const boundary = Buffer.alloc(1);
+		const handle = await fs.promises.open(session.filePath, 'r');
+		await handle.read(boundary, 0, 1, full.offset - 1);
+		await handle.close();
+		if (boundary[0] !== 0x0A) {
+			resume.misaligned++;
+			resumeProblems.push(
+				`${session.sessionId} offset ${full.offset} of ${session.fileSize} is not a record boundary`
+			);
+		}
+	}
+
+	// only sessions carrying a marker can disagree about a verdict, and replaying the
+	// other 47 would write a hundred megabytes to say undefined seven more times
+	if (full.approving === undefined) {
+		resume.skipped++;
+		continue;
+	}
+
+	const source = await fs.promises.open(session.filePath, 'r');
+	const sink = await fs.promises.open(replayFile, 'w');
+	try {
+		const step = Math.ceil(session.fileSize / RESUME_STEPS);
+		const slice = Buffer.alloc(step);
+		let written = 0;
+		let offset = 0;
+		let verdict;
+		while (written < session.fileSize) {
+			const { bytesRead } = await source.read(slice, 0, step, written);
+			if (bytesRead === 0) {
+				break;
+			}
+			await sink.write(slice, 0, bytesRead, written);
+			written += bytesRead;
+			const scan = await scanTail(replayFile, offset);
+			offset = scan.offset;
+			if (scan.approving !== undefined) {
+				verdict = scan.approving;
+			}
+		}
+		resume.replayed++;
+		if (verdict !== full.approving) {
+			resume.mismatched++;
+			resumeProblems.push(
+				`${session.sessionId} replayed to ${verdict} but a full scan says ${full.approving}`
+			);
+		}
+	} finally {
+		await source.close();
+		await sink.close();
+	}
+}
+await fs.promises.unlink(replayFile).catch(() => {});
+
+console.log(
+	`resume replay       : ${resume.replayed} replayed in ${RESUME_STEPS} steps, ` +
+	`${resume.skipped} with no marker skipped`
+);
+console.log(`offsets misaligned  : ${resume.misaligned} of ${all.length}`);
+console.log(`verdicts changed    : ${resume.mismatched} of ${resume.replayed}`);
+
 console.log('\n--- sessions as the tree would show them ---');
 for (const session of kept.slice(0, 12)) {
 	const uri = localSessionUriString(session.sessionId);
@@ -116,6 +194,9 @@ console.log(`no creationDate     : ${noCreationDate}`);
 console.log(`orders agree on     : ${agree} of ${kept.length} positions`);
 
 const failures = [];
+if (resumeProblems.length) {
+	failures.push(...resumeProblems);
+}
 if (outOfOrder) {
 	failures.push(`created order is wrong at ${outOfOrder} position(s)`);
 }

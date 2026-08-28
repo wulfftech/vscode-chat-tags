@@ -293,13 +293,15 @@ Two details the implementation depends on, both measured rather than assumed. Th
 
 Cost is the size of the delta, not the session: files are append-only, so the tracker keeps a byte offset and only advances it to a record boundary, leaving a half-written line to be re-read. Median append is 70 bytes, p90 12 KB, p99 317 KB, with one 23 MB outlier. Nothing is parsed and no content is extracted — it is a fixed-string search for two ids.
 
+**That offset has to be counted in bytes.** The scan searches the raw buffer rather than a decoded string, and the reason is the offset it reports rather than the search itself. Decode first and every index becomes a character count, which runs short of the byte offset by one for each extra byte of every multi-byte character in the range — 28 of the 62 sessions here carry enough non-ASCII for that, the worst of them short by 15 KB across 50 MB. The next scan then resumes mid-record, short of where the last one stopped, and a resume that lands between a marker and the command it approved sees that command with no marker ahead of it, which clears the flag on a session still approving. Both patterns are ASCII, so a byte search finds exactly what a text search finds, and the index it yields is already a seek position.
+
 Known limits, all accepted:
 
 - clicking Disable and running nothing further leaves the pill up until the next command or a reload. It over-warns, which is the right direction for a safety badge
 - a session approved in another window flags here too. It genuinely is auto-approving, just not in this window's map
 - with no policy in the way, an elevated picker level filters the session analyzer out entirely (`Si = it ? analyzers.filter(z => !(z instanceof ZEe)) : analyzers`), so the marker never appears. The permission pill covers that case, which is why the two indicators are complementary rather than redundant
 
-`npm run probe` reports the distribution. It scans from the top rather than from a baseline, so it reports history rather than liveness — enough to prove the marker still parses out of real files.
+`npm run probe` reports the distribution. It scans from the top rather than from a baseline, so it reports history rather than liveness — enough to prove the marker still parses out of real files. It also replays every marker-carrying session as seven appends, resuming each time from the offset the previous scan returned, and asserts that each of those offsets sits immediately after a newline. The assertion is the half that bites. A drifting offset only flips a verdict when it happens to land between a marker and its command, so the replay on its own passed for a while against offsets that were wrong on 28 of the 62 files here.
 
 ### Retrieving warningAccepted anyway
 
