@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.1
+
+- Fixed the pane taking the whole extension host down on a large chat history. With a few hundred sessions on disk it re-read every one of them every time a live chat wrote a line, and each read decoded megabytes of chat payload into strings just to find the end of a record. The same work now takes an eighth of the memory and an eighth of the time, and an active chat no longer sets off a fresh read of everything you own.
+- Chats whose opening record runs long were reporting the wrong message count, and some were showing the wrong permission pill or none at all. One chat here claimed to hold nothing while holding seven messages, with its **Autopilot** pill missing the entire time.
+- Titles containing an em-dash or an accented character come back intact instead of mangled.
+- The **Auto-approving** pill stays up on a chat that is still auto-approving. It could previously clear itself while the chat carried on running commands unattended, which is the wrong way for a safety badge to fail.
+
 ## 0.12.0
 
 - **+** opens a new chat as an editor tab again, where `chatTags.openTarget` puts a clicked one. It had been landing in the chat view instead. The command it relied on has no registration: VS Code only ever creates that id for contributed session types, and the plain local chat isn't one, so the button had been quietly falling through to a fallback since the day it shipped.
