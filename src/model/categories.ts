@@ -34,9 +34,12 @@ export interface SessionMeta {
 	titleSource?: 'manual' | 'llm';
 	// last time the user actually opened this session — anything newer needs attention
 	seenAt?: number;
-	// archived is ours, not vs code's. its own archived state lives in state.vscdb behind
-	// the storage service, so we could write it but never read it back to reconcile
+	// archived is ours, not vs code's — theirs is per workspace in state.vscdb, ours is
+	// one flag for every window. see archiveSeed.ts for why the write direction is shut
 	archivedAt?: number;
+	// vs code's archive flag for this session has been taken into account once already.
+	// without it, unarchiving here would be undone by the next seed
+	vscodeArchiveSeeded?: boolean;
 }
 
 // curated so every entry stays legible tinted on both light and dark backgrounds
@@ -146,6 +149,29 @@ export class TagStore {
 
 	async setArchived(sessionId: string, archived: boolean): Promise<void> {
 		await this.patchMeta(sessionId, { archivedAt: archived ? Date.now() : undefined });
+	}
+
+	// one-way seed from vs code's own archive. a session is only ever taken once, so
+	// unarchiving here sticks and one archived over there later still arrives
+	async seedArchived(sessionIds: string[]): Promise<number> {
+		const meta = { ...this.allMeta };
+		const now = Date.now();
+		let adopted = 0;
+		for (const sessionId of sessionIds) {
+			const entry = meta[sessionId] ?? {};
+			if (entry.vscodeArchiveSeeded) {
+				continue;
+			}
+			// their flag carries no date, so this stamps the seed rather than invent one
+			meta[sessionId] = { ...entry, vscodeArchiveSeeded: true, archivedAt: entry.archivedAt ?? now };
+			adopted++;
+		}
+		if (!adopted) {
+			return 0;
+		}
+		await this.memento.update(SESSION_META_KEY, meta);
+		this._onDidChange.fire();
+		return adopted;
 	}
 
 	// deleting a session leaves its metadata behind pointing at nothing, and the memento

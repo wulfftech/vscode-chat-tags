@@ -229,6 +229,7 @@
 		"watch": "tsc -watch -p ./",
 		"probe": "node scripts/probe.mjs",
 		"probe:exchange": "node scripts/probe-exchange.mjs",
+		"probe:archive": "node scripts/probe-archive.mjs",
 		"package": "npm run clean && tsc -p ./ && vsce package",
 		"clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\""
 	},

@@ -3,6 +3,7 @@
 
 import * as fs from 'fs';
 import * as vscode from 'vscode';
+import { readArchivedSessionIds, stateDbBeside } from '../core/archiveSeed';
 import { ChatSessionInfo, activityStateOf, compareSessions, listSessions } from '../core/sessions';
 import { PALETTE, TagStore } from '../model/categories';
 import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
@@ -79,6 +80,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	private refreshTimer?: NodeJS.Timeout;
 	private refreshing = false;
 	private refreshQueued = false;
+	// vs code's archive is read once per window, on the first pass that knows the list
+	private seededArchive = false;
 
 	constructor(
 		private readonly extensionUri: vscode.Uri,
@@ -163,6 +166,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	private async scan(): Promise<void> {
 		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir)));
 		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+		await this.seedArchiveOnce();
 		// the first pass only records where the files already ended — see the tracker for
 		// why anything written before this window started cannot be read as live
 		await this.approvals.update(this.sessions);
@@ -186,6 +190,35 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		if (fresh) {
 			this.activeSessionId = fresh.sessionId;
 			this.awaitingNewSession = false;
+		}
+	}
+
+	// chats archived in vs code's own chat view were all showing as live here, because
+	// its archive and ours are separate stores that never reconcile. take it once, and
+	// only for sessions actually in the list — a stale page then cannot archive a row
+	// that isn't ours to begin with
+	private async seedArchiveOnce(): Promise<void> {
+		if (this.seededArchive) {
+			return;
+		}
+		this.seededArchive = true;
+		const known = new Set(this.sessions.map(session => session.sessionId));
+		for (const directory of this.directories) {
+			const database = stateDbBeside(directory);
+			try {
+				const found = await readArchivedSessionIds(database);
+				const archived = found.filter(sessionId => known.has(sessionId));
+				const adopted = archived.length ? await this.tags.seedArchived(archived) : 0;
+				// logged even at zero: on a machine reporting chats it archived over there
+				// still showing here, this line is the difference between a database we
+				// could not read and one that genuinely holds nothing
+				this.log.appendLine(
+					`[archive] ${database}: ${found.length} archived, ${archived.length} in the list, ${adopted} adopted`
+				);
+			} catch (error) {
+				// a missing archive is not worth a broken pane
+				this.log.appendLine(`[archive] ${database}: ${error instanceof Error ? error.message : String(error)}`);
+			}
 		}
 	}
 

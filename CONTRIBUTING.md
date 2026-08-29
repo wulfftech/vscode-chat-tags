@@ -69,6 +69,46 @@ A store is not always this machine's 66 files and 113 MB. A report from a 614-fi
 
 The old skip carried a correctness bug as well. `skipToNextLine` consumed the `kind:0` header without ever setting `firstLineSkipped`, so in any session whose header ran past a chunk boundary the *next* real record was swallowed as though it were the header. Four sessions here were wrong because of it, one reporting no request appends at all against seven on disk and losing its `autopilot` level with them. The check for that is a full read of the file rather than a comparison against the old numbers, since the old numbers were the thing under suspicion.
 
+## Archive, and the two stores
+
+Archiving is ours, but VS Code has its own and the two do not meet. Left alone, a machine that did its archiving in the chat view shows every one of those chats sitting live in this pane — which is what a report described, and it is not a bug in our tracking so much as an absence of one.
+
+| | Chat Tags | VS Code |
+|---|---|---|
+| Where | `globalStorage/state.vscdb`, our `globalState` | `workspaceStorage/<hash>/state.vscdb`, key `agentSessions.state.cache` |
+| Shape | `chatTags.sessionMeta[id].archivedAt`, a timestamp | `[{resource, archived, pinned, read}]` |
+| Scope | global — one flag for every window | per workspace |
+| Written | on every change | on `onWillSaveState` |
+
+Measured here: 5 archived sessions across 3 of 14 workspaces on one side, 5 unrelated ones on the other, and the key absent from `globalStorage` entirely, which is what pins its scope to workspace rather than profile.
+
+### The write direction is shut, not the read
+
+The earlier note in this file had these the wrong way round — it said we could write their flag but never read it back. Both halves were wrong.
+
+There is no archive in the extension API at all: `vscode.d.ts` at 1.134.0 mentions chat 216 times and archive zero times. Inside the workbench, `setArchived` hands provider-backed sessions to `chatSessionsService.setChatSessionItemArchived`, which throws unless a registered item controller supplies the method. A plain local chat has no controller, so it falls through to a workspace-scoped cache that no extension can reach. Writing is the closed direction.
+
+Reading is the open one, by the same byte scan this file already describes for `warningAccepted`. That reverses the standing refusal to touch `state.vscdb`, and the trade is worth naming: the alternative was a pane that silently disagrees with the chat view about what you put away.
+
+### Seeding
+
+`archiveSeed.ts` reads the database beside each sessions directory and hands the archived ids to `TagStore.seedArchived`. Four things hold it together:
+
+**It runs one way.** Their flag can set ours; ours never touches theirs, and an unarchive here is never reported back.
+
+**A session is taken once.** `vscodeArchiveSeeded` on the meta records that their flag has been accounted for, and it survives unarchiving. Without it the next seed would undo a restore, every window, forever. It is per session rather than per workspace, so a chat archived over there *after* the first pass still arrives.
+
+**Only sessions in the list are taken.** The ids are intersected with what the scan actually found on disk, so a misread page cannot archive a row that was never ours.
+
+**The newest copy wins.** A table leaf stores the key immediately before its value, so one scan finds both — but the same key also sits in the primary-key index with nothing behind it, and a freed page can still hold a superseded copy. Requiring a `[` straight after the key rules out the index. For the rest, every entry carries the epoch it was last read at, and the copy holding the newest one is the live page. On this machine one file holds two copies and the freed one is 76 seconds behind, a strict subset of the other.
+
+`npm run probe:archive` reports both sides and asserts the last of those. It carries a synthetic two-copy buffer as well, because the real files here have been single-copy for whole releases at a time and an assertion that never runs is not one.
+
+Two limits, both accepted:
+
+- empty-window sessions are not seeded. Their directory sits next to `globalStorage`, where there is no `state.vscdb`, and an empty window's own storage hash is not something we can map back with any confidence
+- VS Code flushes on `onWillSaveState`, so a chat archived seconds before the pane first reads is missed until the next window
+
 ## Opening a session
 
 There's no public API for "open this chat session". Three ways work, tried in order:
@@ -220,6 +260,12 @@ The subtitle input — the last-exchange reader over every session on the machin
 npm run probe:exchange
 ```
 
+What the archive seed would take from VS Code's own store, across every workspace on the machine, plus the stale-page assertion:
+
+```bash
+npm run probe:archive
+```
+
 The webview, outside VS Code. Inlines the real `media/view.css` and `media/view.js` into a two-theme harness:
 
 ```bash
@@ -328,7 +374,7 @@ It can be read, read-only, two ways — worth writing down because "you can't ge
 | `globalStorage/state.vscdb` | the SQLite table leaf stores the key immediately followed by its value, so a byte scan finds `…warningAccepted` then `true` |
 | `sync/globalState/lastSyncglobalState.json` | plain JSON: `{"version":1,"value":"true","scope":0}` |
 
-Neither belongs in the extension. The value is application-scoped, so every row in the list reads the same thing and it cannot tell one session from another. `state.vscdb` is the file this project already refuses to touch behind the workbench's back, and a byte scan of a live database is at the mercy of page moves and a `-wal` that may hold a newer value. The sync file exists only with Settings Sync switched on and caches the last sync rather than the present.
+Neither belongs in the extension, and the reason is the value rather than the file. It is application-scoped, so every row in the list reads the same thing and it cannot tell one session from another — a badge that says the same word about all 600 of your chats is wallpaper. The archive seed does now read `state.vscdb`, so the file itself is no longer the objection; what still applies there applies here too, that a byte scan of a live database is at the mercy of page moves and a `-wal` that may hold a newer value. The sync file exists only with Settings Sync switched on and caches the last sync rather than the present.
 
 There is a trap in searching session files for the string. It matches chats that merely *discuss* the flag. Two sessions here contain it: one has 32 hits and genuine approval markers, the other has a single hit inside a PowerShell command typed while researching it and no approval anywhere. The string tracks who typed the flag name, not the state — the per-session evidence is `autoApproveInfo`, and that is the one-way trace above.
 

@@ -89,14 +89,16 @@ Two completely different things. They work differently on purpose.
 |---|---|---|
 | Reversible | Yes | No |
 | Touches the session file | No | Yes — removes it |
-| Whose state | Chat Tags' | VS Code's |
+| Whose state | Chat Tags', seeded once from VS Code's | VS Code's |
 | The native list | Unaffected | Session disappears |
 
 ### Archive is ours
 
 Archived sessions drop out of the list into a section at the bottom, shown only when **Show archived** is on. Until then a footer counts them — because a hidden session with no visible count is how you end up absolutely certain something ate your chat.
 
-VS Code has its own archived flag. `/clear` sets it. This deliberately doesn't touch it. That state lives in `state.vscdb` behind the storage service, so an extension can write it and can never read it back. Mirroring it would be shouting into a hole — write-only, and nothing ever comes back to tell you it drifted. Ours is a timestamp in extension state, same as everything else Chat Tags remembers.
+VS Code has its own archived flag, and it is a separate store. Theirs is scoped to one workspace and lives in that workspace's `state.vscdb`; ours is a timestamp in extension state, one flag across every window, same as everything else Chat Tags remembers.
+
+Because nothing reconciles the two, a machine that had done its archiving in the chat view used to show every one of those chats sitting live in this pane. So the first time the pane reads a workspace it takes VS Code's archived flag as a starting point. It runs one way and once per chat: archive something here afterwards and it stays archived, restore it and it stays restored. Nothing is ever written back — the archive API doesn't exist for an extension, and the workbench's own route rejects a local chat outright.
 
 Archived sessions get skipped by the automatic subtitle sweep and don't count towards the unread badge. Something you've put away doesn't get to spend your money or ask for your attention.
 
