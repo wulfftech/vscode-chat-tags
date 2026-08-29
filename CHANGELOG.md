@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.0
+
+- Chats you archived in VS Code's own chat view show as archived here. The two archives were separate stores that never reconciled — VS Code keeps its own, scoped to one workspace, and this pane keeps a flag of its own — so a machine that had done its archiving over there saw every one of those chats sitting live in the list. On a large store that is hundreds of rows you thought you had put away.
+- Taking it runs one way and once per chat, so archiving or restoring something here afterwards is never undone by a later read. Nothing is written back to VS Code, which has no archive API for an extension to write to in any case.
+
 ## 0.12.1
 
 - Fixed the pane taking the whole extension host down on a large chat history. With a few hundred sessions on disk it re-read every one of them every time a live chat wrote a line, and each read decoded megabytes of chat payload into strings just to find the end of a record. The same work now takes an eighth of the memory and an eighth of the time, and an active chat no longer sets off a fresh read of everything you own.
