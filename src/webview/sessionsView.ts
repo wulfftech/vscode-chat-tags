@@ -164,7 +164,9 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private async scan(): Promise<void> {
-		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir)));
+		const perDirectory = await Promise.all(this.directories.map(dir => listSessions(dir, {
+			onParseError: ({ filePath, parseError }) => this.log.appendLine(`[session] ${filePath}: ${parseError}`)
+		})));
 		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 		await this.seedArchiveOnce();
 		// the first pass only records where the files already ended — see the tracker for

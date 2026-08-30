@@ -69,6 +69,18 @@ A store is not always this machine's 66 files and 113 MB. A report from a 614-fi
 
 The old skip carried a correctness bug as well. `skipToNextLine` consumed the `kind:0` header without ever setting `firstLineSkipped`, so in any session whose header ran past a chunk boundary the *next* real record was swallowed as though it were the header. Four sessions here were wrong because of it, one reporting no request appends at all against seven on disk and losing its `autopilot` level with them. The check for that is a full read of the file rather than a comparison against the old numbers, since the old numbers were the thing under suspicion.
 
+### A fork is the one session whose header is not a stub
+
+Everything above assumes the header is close to empty and the patch log carries the content. **Forking a chat breaks that assumption outright.** VS Code clones the source conversation in memory and persists the result as one `kind:0` line holding the whole thing — full title, every request, every response — with no patch lines after it, ever. A report said forked chats never showed up at all, and this is why: `readFirstLine` caps a header read at 512 KB, chosen because a normal header is a few hundred bytes and anything past that is someone else's payload. A forked conversation's header *is* the payload. Past 512 KB the read lands mid-object, `JSON.parse` throws, and the session comes back with zero requests and no title — exactly what an untouched chat looks like, so `listSessions` drops it on the same filter that hides those.
+
+Measured against the session that first showed this: a 50 MB original conversation forked into a 49 MB single-line header. `readSession` on it reported `requestCount: 0`, `title` fallen back to the raw session id, `parseError: "Unterminated string in JSON at position 522423"` — the exact position `readFirstLine`'s cap lands at. A historical fork already on the same machine, 517 KB, parsed fine — the same code path, just short enough not to trip the cap.
+
+Fixing it without paying to decode 49 MB into one JS string: `customTitle`, `sessionId` and `creationDate` sit within the first few hundred bytes of the header no matter how huge `requests` gets, because VS Code writes `requests` last. Those come off the same 512 KB prefix the strict parse already read, by regex rather than a full parse. The request count is the one field that needs the whole array walked — there is no way to know how many elements it holds without passing over all of them — but walking is not parsing: `countHeaderRequests` tracks bracket depth and string/escape state one byte at a time, exactly like the delta scanner's own record-boundary search, and never turns a request's payload into a string. A synthetic 36 MB, 300-request fixture reads in ~110 ms at ~48 MB RSS. An adversarial fixture whose request text is deliberately built from stray `{`, `}`, `"requests":[` and backslash sequences still counts correctly, because those bytes are inspected while `inString` is true and never treated as structure.
+
+The fallback only runs when the strict parse failed *and* the header read hit its byte cap rather than finding a newline — a `truncated` flag on the read, not a guess from the error text. A small file that is genuinely malformed still fails exactly as before; scanning further would not recover anything from real corruption; it only recovers from a true header being longer than the cap. And the ceiling on how far the request-count walk goes is generous rather than infinite — 64 MB, matching the reasoning behind the equivalent ceiling in `archiveSeed.ts` — because the count only has to reach 1 for the row to stop being empty, and that happens the moment the first request begins, so even a walk that hits the ceiling before the array closes has already stopped the session from vanishing.
+
+`parseError` was captured on `ChatSessionInfo` from the start and never read anywhere — a session that failed for a real, unrecoverable reason vanished exactly as silently as one that failed for a fixable one. `listSessions` now takes an `onParseError` hook, and the pane logs through it, so a session that still can't be read leaves a line in Show Log instead of nothing.
+
 ## Archive, and the two stores
 
 Archiving is ours, but VS Code has its own and the two do not meet. Left alone, a machine that did its archiving in the chat view shows every one of those chats sitting live in this pane — which is what a report described, and it is not a bug in our tracking so much as an absence of one.
@@ -264,6 +276,12 @@ What the archive seed would take from VS Code's own store, across every workspac
 
 ```bash
 npm run probe:archive
+```
+
+A forked session's giant single-line header, built as fixtures rather than depending on a fork existing on this machine — the big-header fallback, the adversarial content inside it, and that a small or genuinely corrupt header is left on the strict path untouched:
+
+```bash
+npm run probe:fork-header
 ```
 
 The webview, outside VS Code. Inlines the real `media/view.css` and `media/view.js` into a two-theme harness:
