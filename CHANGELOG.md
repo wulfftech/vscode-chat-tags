@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.0
+
+- A category heading can be collapsed, folding its rows out of the way until you open it again. Uncategorised and Archived collapse the same way, and it sticks between windows like every other category setting.
+
 ## 0.13.0
 
 - A forked chat now shows up. VS Code writes a fork as one giant header line holding the whole cloned conversation, rather than the near-empty stub every other chat starts from, and once that line ran past this pane's read limit the session came back reporting no title and no messages — indistinguishable from one you'd opened and never used, so it never made the list at all. A session that still can't be read after this leaves a line in Show Log instead of vanishing without a trace.
