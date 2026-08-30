@@ -121,7 +121,7 @@ function mount(hostId, listSettings) {
 		: (a, b) => b.lastActivityAt - a.lastActivityAt;
 	const visible = (SETTINGS.showArchived ? SESSIONS : SESSIONS.filter(s => !s.archived)).slice().sort(compare);
 	const archivedCount = SESSIONS.filter(s => s.archived).length;
-	listeners.forEach(fn => fn({ data: { type: 'render', sessions: visible, categories: CATEGORIES, archivedCount: archivedCount, settings: SETTINGS, models: MODELS } }));
+	listeners.forEach(fn => fn({ data: { type: 'render', sessions: visible, categories: CATEGORIES, collapsedGroups: [], archivedCount: archivedCount, settings: SETTINGS, models: MODELS } }));
 	if (hostId === 'host-light') {
 		listeners.forEach(fn => fn({ data: { type: 'openPanel', panel: 'settings' } }));
 	}

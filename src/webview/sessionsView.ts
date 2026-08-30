@@ -271,6 +271,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 			type: 'render',
 			sessions: rendered,
 			categories: this.tags.categories,
+			collapsedGroups: this.tags.collapsedGroups,
 			archivedCount,
 			activeSessionId: this.activeSessionId,
 			settings: {
@@ -422,6 +423,9 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				return;
 			case 'markAllRead':
 				await this.tags.markAllSeen(this.sessions.map(session => session.sessionId));
+				return;
+			case 'toggleGroupCollapsed':
+				await this.tags.toggleGroupCollapsed(message.groupId);
 				return;
 		}
 	}

@@ -11,7 +11,9 @@
 		autoSubtitle: false, subtitleIdleSeconds: 120, subtitleMode: 'status', subtitleModel: '',
 		sortBy: 'activity', groupBy: 'none', showArchived: false
 	};
-	let state = { sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0 };
+	let state = {
+		sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0, collapsedGroups: []
+	};
 	let selectedId = null;
 	// last row scrolled to, so a repaint does not keep yanking the list back
 	let revealedId = null;
@@ -33,7 +35,8 @@
 		sort: 'M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z',
 		archive: 'M20.54 5.23l-1.39-1.68A1.45 1.45 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23A1.98 1.98 0 0 0 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z',
 		unarchive: 'M20.55 5.22l-1.39-1.68A1.51 1.51 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z',
-		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z'
+		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+		chevron: 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z'
 	};
 
 	function icon(name, size) {
@@ -727,51 +730,98 @@
 		send({ type: 'open', sessionId });
 	}
 
+	// group headings are focusable stops too, so arrow keys walk the visible list in the
+	// order it's drawn instead of jumping to row 0 whenever a heading has focus
 	function focusOffset(delta) {
-		const rows = Array.from(document.querySelectorAll('.row'));
-		if (!rows.length) { return; }
-		const current = rows.findIndex(row => row === document.activeElement);
-		const next = Math.min(rows.length - 1, Math.max(0, (current === -1 ? 0 : current + delta)));
-		rows[next].focus();
+		const items = Array.from(document.querySelectorAll('.row, .group'));
+		if (!items.length) { return; }
+		const current = items.findIndex(item => item === document.activeElement);
+		const next = Math.min(items.length - 1, Math.max(0, (current === -1 ? 0 : current + delta)));
+		items[next].focus();
 	}
 
 	// grouping is only ever by category, so the order is the order the categories were
 	// defined in and everything without one falls to the bottom
 	function groupSessions(sessions) {
 		if (state.settings.groupBy !== 'category') {
-			return [{ category: null, label: null, sessions: sessions }];
+			return [{ id: null, category: null, label: null, sessions: sessions }];
 		}
 		const groups = [];
 		for (const category of state.categories) {
 			const members = sessions.filter(session => session.categoryId === category.id);
 			if (members.length) {
-				groups.push({ category: category, label: category.name, sessions: members });
+				groups.push({ id: category.id, category: category, label: category.name, sessions: members });
 			}
 		}
 		// a session pointing at a category that has since been deleted belongs here too
 		const known = new Set(state.categories.map(category => category.id));
 		const loose = sessions.filter(session => !known.has(session.categoryId));
 		if (loose.length) {
-			groups.push({ category: null, label: 'Uncategorised', sessions: loose });
+			groups.push({ id: 'uncategorised', category: null, label: 'Uncategorised', sessions: loose });
 		}
 		return groups;
 	}
 
-	function sectionHeader(label, count, colour) {
+	function isGroupCollapsed(groupId) {
+		return state.collapsedGroups.includes(groupId);
+	}
+
+	// shared by both the per-category groups and the archived block below, so collapsing
+	// works the same way in either place instead of two idioms doing the same thing
+	function appendGroupSection(list, id, label, colour, sessions, now) {
+		const collapsed = isGroupCollapsed(id);
+		const containsSelected = sessions.some(session => session.sessionId === selectedId);
+		list.appendChild(sectionHeader(label, sessions.length, colour, id, collapsed, containsSelected));
+		if (collapsed) { return; }
+		for (const session of sessions) {
+			list.appendChild(buildRow(session, now));
+		}
+	}
+
+	// the whole heading toggles, not just a chevron button — a bigger target beats a
+	// precise one for something clicked this often
+	function sectionHeader(label, count, colour, groupId, collapsed, containsSelected) {
 		const header = el('li', 'group');
-		// a heading inside a listbox is furniture, not an option
-		header.setAttribute('role', 'presentation');
+		header.setAttribute('role', 'button');
+		header.tabIndex = 0;
+		header.setAttribute('aria-expanded', String(!collapsed));
+		header.classList.toggle('collapsed', collapsed);
+		// so a render triggered by this very toggle can find this heading again and
+		// re-focus it — the list is torn down and rebuilt wholesale on every render
+		header.dataset.groupId = groupId;
+		const chevron = icon('chevron', 10);
+		chevron.classList.add('chevron');
+		header.appendChild(chevron);
 		const swatch = el('span', 'swatch');
 		if (colour) { swatch.style.setProperty('--swatch', colour); }
 		header.appendChild(swatch);
 		header.appendChild(el('span', 'group-name', label));
 		header.appendChild(el('span', 'group-count', String(count)));
+		const toggle = () => {
+			// about to bring the selected row back into the dom — let the reveal check
+			// below fire again once it's there, or it stays scrolled wherever it landed
+			if (collapsed && containsSelected) { revealedId = null; }
+			send({ type: 'toggleGroupCollapsed', groupId });
+		};
+		header.addEventListener('click', toggle);
+		header.addEventListener('keydown', event => {
+			if (event.key === 'Enter' || event.key === ' ') {
+				event.preventDefault();
+				event.stopPropagation();
+				toggle();
+			}
+		});
 		return header;
 	}
 
 	function render() {
 		const now = Date.now();
 		closePopovers();
+		// a focused heading is about to be torn out from under itself — remember which
+		// group it belonged to so the rebuilt one below can take focus back
+		const focusedGroupId = document.activeElement && document.activeElement.classList.contains('group')
+			? document.activeElement.dataset.groupId
+			: null;
 		root.textContent = '';
 
 		const live = state.sessions.filter(session => !session.archived);
@@ -851,10 +901,14 @@
 		list.setAttribute('role', 'listbox');
 		list.setAttribute('aria-label', 'Chat sessions');
 
+		// collapsed rows are left out of the DOM entirely rather than hidden with css —
+		// this view already does a full teardown/rebuild every render, so there's no
+		// transition to preserve, and keyboard nav's `.row` query stays correct for free
 		for (const group of groupSessions(live)) {
 			if (group.label) {
-				list.appendChild(sectionHeader(group.label, group.sessions.length,
-					group.category ? group.category.colour : null));
+				appendGroupSection(list, group.id, group.label,
+					group.category ? group.category.colour : null, group.sessions, now);
+				continue;
 			}
 			for (const session of group.sessions) {
 				list.appendChild(buildRow(session, now));
@@ -864,12 +918,15 @@
 		// archived stays one block at the bottom whether or not the rest is grouped —
 		// scattering it back through the categories would defeat the point of archiving
 		if (archived.length) {
-			list.appendChild(sectionHeader('Archived', archived.length));
-			for (const session of archived) {
-				list.appendChild(buildRow(session, now));
-			}
+			appendGroupSection(list, 'archived', 'Archived', null, archived, now);
 		}
 		root.appendChild(list);
+
+		if (focusedGroupId) {
+			const restored = Array.from(list.querySelectorAll('.group'))
+				.find(header => header.dataset.groupId === focusedGroupId);
+			if (restored) { restored.focus(); }
+		}
 
 		// a selection you cannot see is not a selection, and an adopted row can be anywhere
 		if (selectedId && selectedId !== revealedId) {
@@ -925,6 +982,7 @@
 				categories: message.categories,
 				models: message.models || [],
 				archivedCount: message.archivedCount || 0,
+				collapsedGroups: message.collapsedGroups || [],
 				settings: Object.assign({}, DEFAULT_SETTINGS, message.settings)
 			};
 			// a redraw mid-edit would throw away what's being typed

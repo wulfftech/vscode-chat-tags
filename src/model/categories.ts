@@ -11,6 +11,9 @@ import { SubtitleMode } from '../core/subtitleText';
 const CATEGORIES_KEY = 'chatTags.categories';
 const SESSION_META_KEY = 'chatTags.sessionMeta';
 const BASELINE_KEY = 'chatTags.baselineAt';
+// one flat list of collapsed group ids: real categories use their own id, and the two
+// pseudo-groups that have no Category behind them get fixed sentinels
+const COLLAPSED_GROUPS_KEY = 'chatTags.collapsedGroups';
 
 export interface Category {
 	id: string;
@@ -140,7 +143,28 @@ export class TagStore {
 			}
 		}
 		await this.memento.update(SESSION_META_KEY, meta);
+
+		// its group can't be collapsed once it no longer exists
+		await this.setGroupCollapsed(id, false);
 		this._onDidChange.fire();
+	}
+
+	get collapsedGroups(): string[] {
+		return this.memento.get<string[]>(COLLAPSED_GROUPS_KEY, []);
+	}
+
+	async toggleGroupCollapsed(groupId: string): Promise<void> {
+		await this.setGroupCollapsed(groupId, !this.collapsedGroups.includes(groupId));
+		this._onDidChange.fire();
+	}
+
+	private async setGroupCollapsed(groupId: string, collapsed: boolean): Promise<void> {
+		const current = this.collapsedGroups;
+		if (current.includes(groupId) === collapsed) {
+			return;
+		}
+		const next = collapsed ? [...current, groupId] : current.filter(entry => entry !== groupId);
+		await this.memento.update(COLLAPSED_GROUPS_KEY, next);
 	}
 
 	async setCategory(sessionId: string, categoryId: string | undefined): Promise<void> {

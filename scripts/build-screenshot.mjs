@@ -279,6 +279,7 @@ function mount(pane) {
 		type: 'render',
 		sessions: visible,
 		categories: CATEGORIES,
+		collapsedGroups: [],
 		archivedCount: pool.filter(s => s.archived).length,
 		settings: settings,
 		models: MODELS

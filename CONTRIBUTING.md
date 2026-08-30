@@ -235,6 +235,18 @@ So the view is a `WebviewViewProvider`. Rows are 54px, two lines, with a categor
 
 What it costs: keyboard navigation, selection and accessibility are hand-built rather than free. Interactions deliberately go through native quick picks instead of HTML menus, which keeps them keyboard accessible without reimplementing a menu system from scratch.
 
+## Collapsible category groups
+
+Collapse state lives in `TagStore.collapsedGroups` (`src/model/categories.ts`), one flat `string[]` in globalState — the same "global, not per-webview" home as every other piece of category state (colour, name). Real categories use their own `id`; "Uncategorised" and "Archived" have no `Category` behind them, so they get fixed sentinel strings (`'uncategorised'`, `'archived'`). No collision is possible — real ids come out of `makeId()` as `cat_<random>`. A flat array of ids handling both cases turned out simpler than the alternative floated when this was scoped (`Category.collapsed` plus a second mechanism for the two pseudo-groups) — that would be two mechanisms for one job instead of one.
+
+Collapsed groups are left out of the DOM entirely in `media/view.js`'s `render()`, not hidden with CSS. `render()` already does `root.textContent = ''` and rebuilds everything from scratch on every call — there is no transition to preserve either way, and keeping collapsed rows out of the DOM means `focusOffset()`'s `.row`/`.group` query is correct for free instead of needing to filter out `display:none` elements.
+
+That full-teardown render is exactly what makes a focusable heading tricky. Toggling a group by keyboard destroys the very `<li>` that has focus, and nothing refocuses its replacement by default — first pass through this shipped with that bug. The fix: `render()` reads `document.activeElement.dataset.groupId` before tearing the DOM down, then looks up the rebuilt header by that id afterward and refocuses it. `focusOffset()` also had to start treating `.group` headers as navigable stops alongside `.row`s, or a focused header made `document.activeElement` invisible to the row query and every arrow press degenerated to "jump to row 0."
+
+One more non-obvious interaction: the "scroll the selection into view" check (`if (selectedId && selectedId !== revealedId)`, further down `render()`) only re-fires when the *selected session* changes, not when a group's visibility changes. Re-expanding a group holding the selected session would otherwise bring its row back into the DOM without ever scrolling to it. The header's toggle handler resets `revealedId = null` when it's about to expand a group containing `selectedId`, so the existing reveal logic runs again on the next render.
+
+**Verified in a standalone browser harness only** (`view.css`/`view.js` served statically with `acquireVsCodeApi` stubbed and a fake extension-host round-trip for `toggleGroupCollapsed`), not in a live VS Code Extension Development Host window — confirmed collapse/expand, chevron rotation, focus restoration, arrow-key traversal across headers, and the reveal-on-expand fix all work against the real compiled `view.js`, but VS Code's own webview host, theming, and screen-reader behavior were never exercised.
+
 ## Icons
 
 One source logo, three derivatives, built by `scripts/build-icons.ps1`:

@@ -718,9 +718,13 @@ button {
 
 /* ── grouping ───────────────────────────────────────────── */
 
-/* a group heading is furniture, so it sits below the toolbar but above the rows it
-   introduces and never takes the row treatment */
+/* a group heading sits below the toolbar but above the rows it introduces, and never
+   takes the row treatment — but unlike a row it's a single toggle, not a listbox option.
+   padding-left stays 14px to match .row, so the swatch lines up with the dot beneath it;
+   the chevron is positioned into that same inset rather than added to the flex flow, or
+   every heading's swatch/name/count would shift right of the rows they introduce */
 .group {
+	position: relative;
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -730,7 +734,29 @@ button {
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
 	color: var(--vscode-descriptionForeground);
-	cursor: default;
+	cursor: pointer;
+}
+
+.group:hover {
+	color: var(--vscode-foreground);
+}
+
+.group:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+/* no transition here — the list does a full teardown/rebuild on every render, so a
+   collapsed chevron is simply born rotated rather than animating into place */
+.group .chevron {
+	position: absolute;
+	left: 1px;
+	top: 50%;
+	transform: translateY(-50%);
+}
+
+.group.collapsed .chevron {
+	transform: translateY(-50%) rotate(-90deg);
 }
 
 .group .swatch {
