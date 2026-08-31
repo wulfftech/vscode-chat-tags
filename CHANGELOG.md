@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0
 
 - A chat that is mid-answer now reads as busy instead of as unread. Every write an agent makes to its session file used to land as "something happened here", so a chat doing exactly what you asked sat there lit like it needed rescuing. It gets the one signal nothing else in the pane uses — the dot hollows to a ring and breathes — and none of the ones that mean it wants you.
 - A chat parked on a confirmation says so, with a **Needs input** pill. That is VS Code's own reading, the same state behind the **Needs Input** badge on its agents status bar, taken out of the session file rather than guessed at from timing.
