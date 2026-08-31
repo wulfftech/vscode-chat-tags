@@ -14,7 +14,7 @@ import * as path from 'node:path';
 const require = createRequire(import.meta.url);
 const { listSessions, activityStateOf, compareSessions } = require('../out/core/sessions.js');
 const { localSessionUriString, parseLocalSessionUri } = require('../out/core/sessionUri.js');
-const { scanTail } = require('../out/core/sessionApproval.js');
+const { scanTail } = require('../out/core/sessionLive.js');
 const { WORKSPACE_SESSIONS_DIRNAME, EMPTY_WINDOW_SESSIONS_DIRNAME } = require('../out/core/locations.js');
 
 const userDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User');
@@ -77,15 +77,67 @@ console.log(`activity states     : ${JSON.stringify(states)}`);
 console.log(`permission levels   : ${JSON.stringify(levels)}`);
 
 // scanned from the top rather than from an activation baseline, so this reports history
-// rather than liveness — enough to prove the marker still parses out of real files
+// rather than liveness — enough to prove the markers still parse out of real files
 const approval = { approving: 0, stopped: 0, noTerminal: 0 };
+const turns = { working: 0, waiting: 0, closed: 0 };
+const stillOpen = [];
 for (const session of all) {
 	const scan = await scanTail(session.filePath, 0);
 	if (scan.approving === true) { approval.approving++; }
 	else if (scan.approving === false) { approval.stopped++; }
 	else { approval.noTerminal++; }
+	turns[scan.open ?? 'closed']++;
+	if (scan.open) { stillOpen.push({ session, open: scan.open }); }
 }
 console.log(`session approval    : ${JSON.stringify(approval)}`);
+console.log(`open turns          : ${JSON.stringify(turns)}`);
+
+// a turn goes open when a request is appended and closed when its result is written, so
+// a window shut down mid-answer leaves one open for good. the extension only reads a turn
+// as live when the file has also moved inside chatTags.recentMinutes, and the youngest
+// abandoned turn on disk is the whole safety margin for that cutoff
+const youngestOpen = stillOpen.reduce(
+	(best, entry) => Math.min(best, now - entry.session.lastActivityAt), Infinity);
+if (stillOpen.length) {
+	console.log(`youngest open turn  : ${Math.round(youngestOpen / 60_000)} min stale ` +
+		`(default cutoff is 10 min)`);
+}
+
+// the turn reading rests entirely on byte needles finding exactly the records a real parse
+// would find and nothing else. a quote inside a json string is escaped and every needle
+// carries bare ones, so a payload cannot contain one — but that is an argument, and this
+// is the measurement. any gap is a needle matching something it shouldn't
+const NEEDLES = {
+	append: '{"kind":2,"k":["requests"],',
+	result: ',"result"],"v":',
+	state: ',"modelState"],"v":{"value":'
+};
+const RECORD_HEAD = /^\{"kind":(\d+),"k":\["requests"(?:,\d+,"(\w+)")?\]/;
+const rawCounts = { append: 0, result: 0, state: 0 };
+const parsedCounts = { append: 0, result: 0, state: 0 };
+for (const session of all) {
+	const buffer = await fs.promises.readFile(session.filePath);
+	for (const [kind, needle] of Object.entries(NEEDLES)) {
+		let at = buffer.indexOf(needle, 0, 'latin1');
+		while (at !== -1) {
+			rawCounts[kind]++;
+			at = buffer.indexOf(needle, at + needle.length, 'latin1');
+		}
+	}
+	let header = true;
+	for (const line of buffer.toString('utf8').split('\n')) {
+		if (header) { header = false; continue; }
+		const head = RECORD_HEAD.exec(line.slice(0, 200));
+		if (!head) { continue; }
+		if (head[2] === undefined) { if (head[1] === '2') { parsedCounts.append++; } }
+		else if (head[2] === 'result') { parsedCounts.result++; }
+		else if (head[2] === 'modelState') { parsedCounts.state++; }
+	}
+}
+const needleGaps = Object.keys(NEEDLES).filter(kind => rawCounts[kind] !== parsedCounts[kind]);
+console.log(`turn needles        : ${Object.entries(rawCounts)
+	.map(([kind, count]) => `${kind} ${count}`).join(', ')}` +
+	` — ${needleGaps.length ? 'DISAGREE with a parsed pass' : 'all agree with a parsed pass'}`);
 console.log(`bytes on disk       : ${(bytes / 1024 / 1024).toFixed(1)} MB`);
 console.log(`scan time           : ${elapsed} ms (two full passes)`);
 
@@ -118,9 +170,9 @@ for (const session of all) {
 		}
 	}
 
-	// only sessions carrying a marker can disagree about a verdict, and replaying the
-	// other 47 would write a hundred megabytes to say undefined seven more times
-	if (full.approving === undefined) {
+	// only a session carrying a marker or an open turn can disagree about anything, and
+	// replaying the rest would write a hundred megabytes to say undefined seven more times
+	if (full.approving === undefined && full.open === undefined) {
 		resume.skipped++;
 		continue;
 	}
@@ -133,6 +185,9 @@ for (const session of all) {
 		let written = 0;
 		let offset = 0;
 		let verdict;
+		// the turn state is the one thing carried across steps rather than re-derived, so
+		// a replay is the only place a carry bug would show
+		let open;
 		while (written < session.fileSize) {
 			const { bytesRead } = await source.read(slice, 0, step, written);
 			if (bytesRead === 0) {
@@ -140,8 +195,9 @@ for (const session of all) {
 			}
 			await sink.write(slice, 0, bytesRead, written);
 			written += bytesRead;
-			const scan = await scanTail(replayFile, offset);
+			const scan = await scanTail(replayFile, offset, open);
 			offset = scan.offset;
+			open = scan.open;
 			if (scan.approving !== undefined) {
 				verdict = scan.approving;
 			}
@@ -151,6 +207,12 @@ for (const session of all) {
 			resume.mismatched++;
 			resumeProblems.push(
 				`${session.sessionId} replayed to ${verdict} but a full scan says ${full.approving}`
+			);
+		}
+		if (open !== full.open) {
+			resume.mismatched++;
+			resumeProblems.push(
+				`${session.sessionId} replayed to turn ${open ?? 'closed'} but a full scan says ${full.open ?? 'closed'}`
 			);
 		}
 	} finally {
@@ -196,6 +258,11 @@ console.log(`orders agree on     : ${agree} of ${kept.length} positions`);
 const failures = [];
 if (resumeProblems.length) {
 	failures.push(...resumeProblems);
+}
+for (const kind of needleGaps) {
+	failures.push(
+		`the ${kind} needle found ${rawCounts[kind]} where a parsed pass found ${parsedCounts[kind]}`
+	);
 }
 if (outOfOrder) {
 	failures.push(`created order is wrong at ${outOfOrder} position(s)`);

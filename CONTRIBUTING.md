@@ -172,6 +172,52 @@ Downstream, `ChatSessionStore.internalDeleteSession` returns early on an id that
 
 The command resolves whether the user confirmed or cancelled, so `fs.existsSync` on the session file afterwards is the only real evidence. That result goes to the log, and the metadata is only dropped when the file actually went.
 
+## Renaming a session, where VS Code can see it
+
+A title kept in extension state is drawn over the list and nothing else. The editor tab's label comes from `ChatEditorInput.getName()`:
+
+```js
+getName() {
+  if (this.model?.title) return this.model.hasCustomTitle ? this.model.title : truncate(this.model.title);
+  if (this._sessionResource) {
+    const session = this.chatService.getSession(this._sessionResource);
+    if (session?.title) return session.title;
+    const stored = this.chatService.getSessionTitle(this._sessionResource);
+    if (stored?.trim()) return stored;
+  }
+  …
+}
+```
+
+Every branch reads the chat model or the chat service. `Tab.label` is readonly in the shipped `vscode.d.ts` and `ChatSession` appears in it nowhere, so there is no seam. Reopening the tab does not help either — the input is reconstructed and calls the same getter.
+
+What *does* update the tab is `chatService.setChatSessionTitle`, and `_trackModelChanges()` fires `_onDidChangeLabel` on every model change, so a rename lands live on an open tab. Four things call it:
+
+| Caller | Reachable from an extension |
+|---|---|
+| `agentSession.rename` | Yes — a registered Action2 id |
+| the `/rename` slash command | No. Registered with the chat slash-command registry, not the commands registry |
+| the agent-host `session/titleChanged` sync | No, and it is not the local path anyway |
+| `ChatEditor.setInput`, restoring `title.preferred` | No. Only fires for a session locked to a coding agent |
+
+So `agentSession.rename` it is, and the argument shape does the work again. It extends the same `BaseAgentSessionAction` as the delete above, so a plain object is used as-is:
+
+```js
+async runWithSessions(sessions, accessor) {
+  const item = sessions.at(0);
+  const typed = await quickInput.input({ prompt: …, value: item.label });
+  typed && (isAgentHost(item) ? … : chatService.setChatSessionTitle(item.resource, typed));
+}
+```
+
+`item.label` is read straight off the object we passed, so sending `{ providerType: 'local', resource, label }` opens VS Code's own rename box **prefilled with the Chat Tags title**. `isAgentHost` is `Jc(providerType)`, false for `local`, so it takes the `setChatSessionTitle` branch.
+
+There is no way to skip the box. The value comes from a quick input, not from an argument, and a quick input is an HTML input rather than a Monaco editor, so the `type` command doesn't reach it either.
+
+Adopting the result is the same problem delete has: the command resolves whether the box was confirmed or dismissed. So the session file decides. `setChatSessionTitle` calls `setCustomTitle` only when the model is loaded, and the save that writes `customTitle` is on the workbench's own schedule — so the rename lands a few refreshes later rather than immediately, and never at all for a chat that isn't open. `pendingRename` holds the pre-rename title for a minute and `adoptRename` drops our copy the moment the file disagrees with it.
+
+`state.vscdb` is not a way round the last part. `chat.ChatSessionStore.index` does carry `{sessionId, title, lastMessageDate, lastResponseState, …}` per session, and `_chatSessionStore.setSessionTitle` patches it even for a closed chat. But it is a much bigger value than the archive array, and the byte scan in `archiveSeed.ts` recovered no complete copy at all from the 25-session workspace here — every hit ran off the end of its page into unrelated bytes. The eleven smaller workspaces it could read lag their session files by days. Its `lastResponseState` is no use for turn state either: only terminal values ever reach it, 21 ones and 6 threes across every index that parsed.
+
 ## Finding the last exchange
 
 A session file reaches 50 MB. The model sees about 1 KB of it. Getting that 1 KB out is the whole problem.
@@ -247,6 +293,32 @@ One more non-obvious interaction: the "scroll the selection into view" check (`i
 
 **Verified in a standalone browser harness only** (`view.css`/`view.js` served statically with `acquireVsCodeApi` stubbed and a fake extension-host round-trip for `toggleGroupCollapsed`), not in a live VS Code Extension Development Host window — confirmed collapse/expand, chevron rotation, focus restoration, arrow-key traversal across headers, and the reveal-on-expand fix all work against the real compiled `view.js`, but VS Code's own webview host, theming, and screen-reader behavior were never exercised.
 
+## Reordering categories
+
+One array is the order everywhere. `TagStore.categories` drives the groups when grouping is on and the category list in every row menu, so there is no second ordering to keep in step — reorder the array and both follow. That was already true; what was missing was any way to change it.
+
+**A move names a gap, not an index.** `moveCategory(id, beforeId?)` puts a category in front of another one, with `beforeId` absent meaning the end of the list. The pane's copy of the list can be a repaint behind a create or a delete, and an index resolved against a list that has since changed length lands somewhere other than the gap the drop line was drawn in. An anchor id either still names that gap or names nothing, and nothing means the end — which is also where a drop below the last row lands anyway. `probe:order` covers both stale directions: an anchor deleted mid-drag, and a category created mid-drag.
+
+**A move that changes nothing writes nothing.** Most drags end where they started. Writing anyway fires `onDidChange`, which reposts and rebuilds the list under a pointer that has only just been let go of. The store compares the new array against the old one before it writes, and the probe counts emitter fires to prove it.
+
+### The drag itself
+
+Pointer events, not HTML5 drag-and-drop. `draggable="true"` on the row breaks mouse selection inside the name input sitting next to the grip, and the drop line has to be drawn by hand either way — so the handle takes a `pointerdown`, captures the pointer, and `dropAnchor()` walks the rows comparing `clientY` against each midpoint.
+
+The row being dragged stays in that scan rather than being skipped. It still occupies its slot on screen, so the gaps the pointer is measured against are the ones the user can see. `isNoOpDrop()` then suppresses the line for the two positions the row is already in — on itself, and in front of the row that already follows it — so a line only ever appears where letting go actually moves something.
+
+One case that only turned up when it was tested: **a click on the handle is not a drop at the end.** With no `pointermove`, the anchor is still `null`, and `null` means "the end of the list" — so a plain click sent a category to the bottom. The anchor now only counts once the pointer has been somewhere to be measured.
+
+`render()` is held off while a drag is in flight, the same way it is held off mid-subtitle-edit — a repaint would rebuild the row the captured pointer is holding. Both routes out of a drag repaint on the way, so nothing stays stale.
+
+### Keyboard
+
+↑ and ↓ on a focused handle, which send the same "in front of that one" the drop line does rather than doing their own arithmetic. `preventDefault` and `stopPropagation` run before the bounds check, deliberately: the pane's global arrow keys walk the session list, and a handle at either end of the list leaking its arrow key would throw focus out of the panel entirely.
+
+A keyboard move repaints the panel, which destroys the handle that has focus — the same trap group headings hit. `render()` reads the focused grip's category id before the teardown, the same line that already reads the focused group's, and `restoreGripFocus()` hands it back afterwards. Without it, the second ↓ in a run has nothing focused left to act on.
+
+**Verified in the browser harness, not in a live VS Code window.** A real mouse drag through the harness emitted the right move; the drop-line placement, the no-op suppression, the escape and click-only exits, every keyboard case and the focus restoration were driven with scripted pointer and key events against the real compiled `view.js`. Reversing the stored order and rebuilding the harness confirmed both the group headings and the row menu follow it. VS Code's own webview host and screen-reader behaviour were not exercised.
+
 ## Icons
 
 One source logo, three derivatives, built by `scripts/build-icons.ps1`:
@@ -294,6 +366,18 @@ A forked session's giant single-line header, built as fixtures rather than depen
 
 ```bash
 npm run probe:fork-header
+```
+
+What the tail scan reads a turn as, also from fixtures, because the two states worth checking cannot be found lying around on a disk — a chat is only parked on a confirmation while it is parked, and the burst of stale `value:4` records a reopened session emits is the thing most likely to be mistaken for one:
+
+```bash
+npm run probe:turn
+```
+
+What reordering a category does to the list, from a stubbed memento — the two directions a move can go, the four ways it can change nothing, and a pane a repaint behind the store:
+
+```bash
+npm run probe:order
 ```
 
 The webview, outside VS Code. Inlines the real `media/view.css` and `media/view.js` into a two-theme harness:
@@ -373,7 +457,7 @@ if (configurationService.getValue("chat.tools.terminal.enableAutoApprove") === t
     && terminalChatService.hasChatSessionAutoApproval(e.chatSessionResource)) { … }
 ```
 
-`sessionApproval.ts` reads it out of the file instead of the unreachable Map. Three things make that work:
+`sessionLive.ts` reads it out of the file instead of the unreachable Map. Three things make that work:
 
 **The marker is a command id, not a sentence.** `workbench.action.terminal.chat.disableSessionAutoApproval` is baked into the `autoApproveInfo` of every command that button auto-approves. The English text beside it is an nls entry and changes with the display language; the id does not. It appears in exactly the 8 sessions here that used the button and none of the other 54.
 
@@ -410,6 +494,76 @@ There is a trap in searching session files for the string. It matches chats that
 
 `enableAutoApprove` is **not** a readable stand-in for `warningAccepted`, tempting as it looks. Whether the terminal tool may auto-approve is an `AND` of three things — the tool being eligible, `enableAutoApprove === true`, and `warningAccepted` — and only the middle one is reachable from an extension. The config-change listener runs one way: setting `enableAutoApprove` to anything but `true` deletes `warningAccepted`, and nothing sets it. So `false` proves auto-approve is off, while `true` proves nothing at all. Since the setting is registered `default: true`, `true` is also what almost every machine reports. The negative is provable and the positive never is, which is the wrong way round for a warning.
 
+## Turn state
+
+Whether a chat is working, waiting on you, or finished. The workbench knows exactly — `ChatModel` carries `requestInProgress`, `hasActiveRequest` and `requestNeedsInput` as observables, and its agents status bar badges them as **in progress** and **needs input** — but all three live in memory behind `IChatService`, and nothing projects them out. The one place they surface as data is the voice agent's `get_session_info` tool dispatcher, which is an internal switch rather than anything registered with `vscode.lm`.
+
+So it comes off the file, from four record shapes.
+
+### The records
+
+A turn opens with a bare append to the requests array and closes when its result is written:
+
+```
+{"kind":2,"k":["requests"],"v":[…]}                     turn N opens
+{"kind":1,"k":["requests",N,"result"],"v":{…}}          turn N closes
+{"kind":1,"k":["requests",N,"modelState"],"v":{"value":X}}
+```
+
+`modelState` is `ChatResponseModel._modelState`, and the values are pinned by the workbench's own accessors — `isComplete` is `value !== 0 && value !== 4`, `isCanceled` is `value === 2`, and the pending-confirmation observer does `_modelState.set({value: 4})` on the way in and `{value: 0}` on the way out:
+
+| value | meaning |
+|---|---|
+| 0 | running |
+| 1 | completed |
+| 2 | cancelled |
+| 3 | errored |
+| 4 | parked on a confirmation — `requestNeedsInput` |
+
+**Only the patch log carries 0 and 4.** `toJSON()` rewrites both to `{value: 2, completedAt: now}`, so anything reading a serialised session sees every unfinished turn as cancelled. Across the sessions here the log holds 47 fours and 30 zeros; the headers hold none.
+
+There is no other route to "waiting". A tool call sitting on an approval prompt writes nothing of its own — all 15,417 `toolInvocationSerialized` parts on this machine are `isComplete: true`, so the invocation only reaches disk once it has already run.
+
+### The state machine
+
+Every turn on disk has the same shape:
+
+```
+APPEND   [N:modelState{4}  N:modelState{0}]*   N:result   N:modelState{1|2|3}
+```
+
+so the scan arms on an append, disarms on a result or a terminal state, and only lets a `modelState` speak while armed.
+
+That guard is not tidiness. **Reopening an old session re-emits `value:4` for turns that closed hours ago** — `isPendingConfirmation` reads `!isUsed` on confirmation parts, and a "Continue to iterate?" widget nobody ever clicked stays unused forever. The largest session here emitted seven of them in one burst on reload, plus a re-written result for an older index. Every one of them lands *after* its own result, which is the only thing separating them from a live confirmation, and the arming rule is what throws them out.
+
+### Byte needles, not a parse
+
+The scan shares `scanTail` with the auto-approval reading — one pass over the appended bytes, five fixed strings, nothing decoded. That is the same argument the approval section makes about byte offsets, and it now carries a second reading on the same offsets.
+
+Three of the needles are new:
+
+```
+{"kind":2,"k":["requests"],
+,"result"],"v":
+,"modelState"],"v":{"value":
+```
+
+None can appear inside a payload, because every quote in a JSON string is escaped and all three carry bare ones. That is an argument, so `npm run probe` measures it instead: it counts each needle raw and again from a parsed pass over record heads, across every session on the machine. Currently 208 appends, 192 results and 264 model states, all three agreeing exactly over 132 MB.
+
+The model state is the one needle whose meaning is the byte *after* it, which makes it the one a chunk boundary can cut in half. A match whose digit falls off the end of the chunk is dropped rather than guessed at, and `scannedTo` is left alone so the overlap finds the whole thing next pass. `probe:turn` places a record so its digit is the first byte of chunk two and checks the answer survives; removing the guard fails exactly that assertion and nothing else.
+
+### Live, versus merely open
+
+A turn stays open forever if the window that opened it went away — the result that would have closed it never gets written. Fifteen sessions on this disk are sitting like that, and `npm run probe` prints the youngest, currently sixty hours stale.
+
+So `sessionsView` only reads a turn as live when the file has also moved inside `chatTags.recentMinutes`. That knob rather than `activeSeconds`, because a single long tool call can leave a genuinely working chat silent for minutes and a row that stops pulsing halfway through a build is worse than one that keeps going a little long.
+
+### What the seed does and doesn't buy
+
+The approval reading baselines at activation and reads nothing behind it, because the workbench's approval map is per-window. Turn state is the opposite: a turn open when the extension host started is a fact about the window we are in.
+
+So the first pass reads the last 256 KB of each file and keeps only the turn state out of it — the offset still lands at the end, so those history bytes never reach the approval reading. Truncation can only ever make the machine say less: starting mid-file leaves it unarmed, and unarmed means unknown, which is the behaviour there was before any of this.
+
 ## Navigation spike
 
 Set `CHAT_TAGS_SPIKE_OUT` to a file path and the extension walks both ladders headlessly, writes a JSON report and closes the window.
@@ -436,7 +590,9 @@ The verdict is read off the top rung alone. `newSession` stops at the first comm
 
 ## Still open
 
-Activity decay works, but `chatTags.activeSeconds` and `chatTags.recentMinutes` were picked by eye rather than by watching real usage. If a row reads as "active" when it plainly isn't, that's the knob.
+Activity decay works, but `chatTags.activeSeconds` and `chatTags.recentMinutes` were picked by eye rather than by watching real usage. If a row reads as "active" when it plainly isn't, that's the knob. `recentMinutes` now does a second job as the cutoff between a turn in flight and one a dead window left open, and that side of it has three orders of magnitude of headroom on this machine — so if the two uses ever want different numbers, this is the one to split.
+
+The rename route has been read out of the 1.135.0 bundle and not yet watched in a live window. The argument shape, the prefill and the branch it takes are all verified against the shipped code; that the box appears where it should and the tab relabels behind it is still an inference.
 
 ## House rules
 

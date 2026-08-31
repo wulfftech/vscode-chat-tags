@@ -174,3 +174,30 @@ export async function deleteSession(sessionId: string): Promise<void> {
 		resource: vscode.Uri.parse(localSessionUriString(sessionId))
 	});
 }
+
+// renaming has to go through the workbench too, and for a harder reason than delete. the
+// title an editor tab shows comes from ChatEditorInput.getName(), which reads the chat
+// model's own title — nothing an extension can reach. Tab.label is readonly in
+// vscode.d.ts and ChatSession appears in it nowhere, so a title kept in extension state
+// is drawn over the list and the tab keeps showing the session's own, reopened or not.
+//
+// agentSession.rename is registered by the same BaseAgentSessionAction family as the
+// delete above, and that base run() passes a bare argument straight through as the
+// session item rather than resolving it. so `label` is what its quick input opens
+// prefilled with: the user gets VS Code's own rename box with the Chat Tags title
+// already in it, and one Enter puts that through chatService.setChatSessionTitle, which
+// is the value the tab, the native list and the session file all read.
+//
+// no way round the box. the other callers of setChatSessionTitle are a /rename slash
+// command registered with the chat registry rather than the command registry, the
+// agent-host title sync, and the chat editor restoring a preferred title for a session
+// locked to a coding agent. none of the three is reachable from out here.
+const RENAME_COMMAND = 'agentSession.rename';
+
+export async function renameSession(sessionId: string, label: string): Promise<void> {
+	await vscode.commands.executeCommand(RENAME_COMMAND, {
+		providerType: 'local',
+		resource: vscode.Uri.parse(localSessionUriString(sessionId)),
+		label
+	});
+}

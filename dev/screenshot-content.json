@@ -7,6 +7,7 @@
     "Keep the '_shows' notes in mind — each row is in the shot to demonstrate something.",
     "Room at 340px pane width: title ~45 chars before it ellipsizes, subtitle ~50.",
     "A session off the default permission level carries 'permissionLevel' — its pill costs the title about 12 of those characters.",
+    "'turn' is 'working' or 'waiting' — a turn in flight. 'working' suppresses the attention border, 'waiting' adds the Needs input pill. Only set it on a row whose ageMinutes is inside chatTags.recentMinutes, or the fixture disagrees with the provider.",
     "'autoApproving' draws the live session-approval pill, which is what a policy-restricted machine sees instead of a permission level.",
     "'_shows' and '_readme' are ignored by both builders. Everything else is rendered.",
     "",
@@ -126,8 +127,9 @@
   },
   "sessions": [
     {
-      "_shows": "grouped: active + unread + generated subtitle. brightest row in the shot.",
+      "_shows": "grouped: parked on a confirmation. 'Needs input' pill, attention border, brightest row in the shot.",
       "id": "g1",
+      "turn": "waiting",
       "title": "Incident Response Escalation Path",
       "subtitle": "Have you tried turning it off and on again?",
       "subtitleSource": "llm",
@@ -139,8 +141,9 @@
       "createdDaysAgo": 0.01
     },
     {
-      "_shows": "grouped: title written by the model — renders with the dotted underline.",
+      "_shows": "grouped: mid-answer — the dot hollows to a ring and pulses, and 'unread' draws no border because the chat is busy, not asking. Also the model-written title, with its dotted underline.",
       "id": "g2",
+      "turn": "working",
       "title": "Rocket Ship 27 — refuckulation attempt",
       "subtitle": "For fuck's sake Ricky, use real space words!",
       "subtitleSource": "llm",

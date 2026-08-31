@@ -132,6 +132,37 @@ export class TagStore {
 		this._onDidChange.fire();
 	}
 
+	// the stored order is the order the pane draws in: the groups when grouping is on, and
+	// the category list in every row menu. one array, read in both places, so there is no
+	// second ordering to keep in step with this one
+	//
+	// a move says "put this one before that one" rather than naming an index. the pane's
+	// copy of the list can be a repaint behind a create or a delete, and an index resolved
+	// against a list that has since changed length lands somewhere other than the gap the
+	// drop line was drawn in. an anchor id still means the same gap either way
+	async moveCategory(id: string, beforeId?: string): Promise<void> {
+		const current = this.categories;
+		const moving = current.find(entry => entry.id === id);
+		if (!moving || id === beforeId) {
+			return;
+		}
+		const rest = current.filter(entry => entry.id !== id);
+		// an anchor that has since been deleted means the end of the list, which is where a
+		// drop below the last row lands anyway
+		const at = beforeId ? rest.findIndex(entry => entry.id === beforeId) : -1;
+		const next = at === -1
+			? [...rest, moving]
+			: [...rest.slice(0, at), moving, ...rest.slice(at)];
+
+		// most drags end where they started. writing anyway would fire a change and repaint
+		// the list under a pointer that has only just been let go of
+		if (next.every((entry, index) => entry.id === current[index]?.id)) {
+			return;
+		}
+		await this.memento.update(CATEGORIES_KEY, next);
+		this._onDidChange.fire();
+	}
+
 	async deleteCategory(id: string): Promise<void> {
 		await this.memento.update(CATEGORIES_KEY, this.categories.filter(entry => entry.id !== id));
 

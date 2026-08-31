@@ -27,6 +27,9 @@ export function loadContent() {
 		categoryId: entry.category,
 		requestCount: entry.requestCount ?? 0,
 		activity: entry.activity ?? 'idle',
+		// 'working' or 'waiting', absent on a session that isn't mid-answer — same as the
+		// provider, which only sets it for a turn that is open and recently written to
+		turn: entry.turn,
 		// absent on a default session, exactly as the provider posts it
 		permissionLevel: entry.permissionLevel,
 		autoApproving: Boolean(entry.autoApproving),

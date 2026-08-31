@@ -20,6 +20,10 @@
 	// null | 'categories' | 'settings' — one at a time, they are separate things
 	let openPanel = null;
 	let editingSubtitleFor = null;
+	// the category being dragged in the panel, held so a repaint arriving mid-drag can be
+	// deferred — the list is torn down and rebuilt on every render, and rebuilding it under
+	// a captured pointer would leave the drag holding an element that is no longer in the dom
+	let draggingCategoryId = null;
 
 	// inline svg rather than text glyphs — a glyph renders at whatever weight the user's
 	// font decides, and ⚙ in particular lands as an emoji on some systems
@@ -36,7 +40,8 @@
 		archive: 'M20.54 5.23l-1.39-1.68A1.45 1.45 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23A1.98 1.98 0 0 0 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z',
 		unarchive: 'M20.55 5.22l-1.39-1.68A1.51 1.51 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z',
 		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
-		chevron: 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z'
+		chevron: 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z',
+		grip: 'M9 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM9 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM9 17a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z'
 	};
 
 	function icon(name, size) {
@@ -155,6 +160,12 @@
 
 		popover.appendChild(el('div', 'sep'));
 
+		// opens VS Code's own rename box, prefilled with whatever this row is showing. it
+		// reads as a dialog opener because it is one, and it is the only route to the title
+		// the editor tab draws
+		addAction(popover, 'Rename in VS Code…',
+			() => send({ type: 'renameInVsCode', sessionId: session.sessionId }), 'plain');
+
 		addAction(popover, session.archived ? 'Restore from archive' : 'Archive',
 			() => send({ type: 'setArchived', sessionId: session.sessionId, archived: !session.archived }), 'plain');
 
@@ -197,47 +208,202 @@
 
 	// ── categories panel ──────────────────────────────────────
 
+	// order is not decoration here: it is what the ⋯ menu lists in, and — when grouping is
+	// on — what order the groups come out in. so it gets a real handle rather than being
+	// whatever order the categories happened to be created in
+
+	// pointer events rather than html5 drag-and-drop. draggable=true on the row breaks
+	// mouse selection inside the name input sitting next to the grip, and the drop line has
+	// to be drawn by hand either way
+	function startReorder(event, grip, row, list) {
+		// a middle or right button on a handle is not a drag
+		if (event.button !== 0) { return; }
+		// preventDefault here also takes the focus the button would have got, and the
+		// keyboard route needs the grip focused — so focus it deliberately instead
+		event.preventDefault();
+		grip.focus();
+		grip.setPointerCapture(event.pointerId);
+		row.classList.add('dragging');
+		draggingCategoryId = row.dataset.categoryId;
+		let anchor = null;
+		let committing = true;
+		// a null anchor means the end of the list, but only once the pointer has been
+		// somewhere to be measured. without this a plain click on the handle reads as a drop
+		// past the last row and quietly sends the category to the bottom
+		let measured = false;
+
+		const move = moved => {
+			measured = true;
+			anchor = dropAnchor(list, moved.clientY);
+			paintDropLine(list, row, anchor);
+		};
+		const stop = () => {
+			grip.removeEventListener('pointermove', move);
+			grip.removeEventListener('pointerup', stop);
+			grip.removeEventListener('pointercancel', abort);
+			grip.removeEventListener('lostpointercapture', abort);
+			document.removeEventListener('keydown', abort, true);
+			const settled = committing && measured && !isNoOpDrop(row, anchor);
+			row.classList.remove('dragging');
+			clearDropLines(list);
+			draggingCategoryId = null;
+			if (settled) {
+				send({
+					type: 'moveCategory',
+					id: row.dataset.categoryId,
+					beforeId: anchor ? anchor.dataset.categoryId : null
+				});
+			} else {
+				// nothing moved, so nothing is coming back to repaint this — and a repaint may
+				// have been held off while the pointer was down
+				render();
+			}
+		};
+		// escape gets the same exit as a cancelled pointer, so a drag started by accident has
+		// a way out that isn't "let go somewhere harmless"
+		const abort = ended => {
+			if (ended.type === 'keydown' && ended.key !== 'Escape') { return; }
+			committing = false;
+			stop();
+		};
+
+		grip.addEventListener('pointermove', move);
+		grip.addEventListener('pointerup', stop);
+		grip.addEventListener('pointercancel', abort);
+		// the backstop. a drag that never gets its pointerup leaves draggingCategoryId set,
+		// and that blocks every repaint until the webview is rebuilt — this fires whenever the
+		// capture goes away for any reason at all, the ordinary release included, by which
+		// point stop() has already taken it off again
+		grip.addEventListener('lostpointercapture', abort);
+		document.addEventListener('keydown', abort, true);
+	}
+
+	// which row the drop lands in front of, or null for the end of the list. the row being
+	// dragged stays in the scan rather than being skipped: it still occupies its slot on
+	// screen, so the gaps the pointer is measured against are the ones the user can see
+	function dropAnchor(list, clientY) {
+		for (const row of list.querySelectorAll('.cat-row')) {
+			const box = row.getBoundingClientRect();
+			if (clientY < box.top + box.height / 2) { return row; }
+		}
+		return null;
+	}
+
+	// a drop that would put the row back where it already is. also what a click on the grip
+	// with no movement at all comes out as, since the anchor is still null
+	function isNoOpDrop(row, anchor) {
+		return anchor === row
+			|| anchor === row.nextElementSibling
+			|| (!anchor && !row.nextElementSibling);
+	}
+
+	function clearDropLines(list) {
+		for (const row of list.querySelectorAll('.cat-row')) {
+			delete row.dataset.drop;
+		}
+	}
+
+	// drawn inside the row it belongs to rather than as its own floating element, so the
+	// line cannot end up out of step with the gap the drop actually lands in
+	function paintDropLine(list, row, anchor) {
+		clearDropLines(list);
+		if (isNoOpDrop(row, anchor)) { return; }
+		if (anchor) {
+			anchor.dataset.drop = 'before';
+		} else if (list.lastElementChild) {
+			list.lastElementChild.dataset.drop = 'after';
+		}
+	}
+
+	// the keyboard route says the same "before this one" the drop line does, so both go
+	// through one path in the store instead of one of them doing its own arithmetic
+	function moveByKeyboard(id, delta) {
+		const ids = state.categories.map(category => category.id);
+		const from = ids.indexOf(id);
+		if (from === -1 || from + delta < 0 || from + delta >= ids.length) { return; }
+		// moving down means landing in front of the one *after* the neighbour being passed,
+		// which past the end of the list is nothing at all
+		const before = ids[delta < 0 ? from - 1 : from + 2];
+		send({ type: 'moveCategory', id: id, beforeId: before === undefined ? null : before });
+	}
+
+	function buildCategoryRow(category, list) {
+		const row = el('div', 'cat-row');
+		row.dataset.categoryId = category.id;
+
+		const grip = el('button', 'grip');
+		grip.appendChild(icon('grip', 13));
+		grip.dataset.categoryId = category.id;
+		grip.title = 'Drag to reorder, or move with ↑ and ↓';
+		grip.setAttribute('aria-label', 'Reorder ' + category.name);
+		grip.addEventListener('pointerdown', event => startReorder(event, grip, row, list));
+		grip.addEventListener('keydown', event => {
+			const delta = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+			if (!delta) { return; }
+			// the list's own arrow keys would otherwise walk focus out of the panel entirely
+			event.preventDefault();
+			event.stopPropagation();
+			moveByKeyboard(category.id, delta);
+		});
+
+		const colour = document.createElement('input');
+		colour.type = 'color';
+		colour.value = category.colour;
+		colour.title = 'Colour';
+		// 'change' not 'input' — 'input' fires continuously while dragging the picker
+		colour.addEventListener('change', () => {
+			send({ type: 'updateCategory', id: category.id, colour: colour.value });
+		});
+
+		const name = document.createElement('input');
+		name.type = 'text';
+		name.value = category.name;
+		name.spellcheck = false;
+		const commitName = () => {
+			const next = name.value.trim();
+			if (next && next !== category.name) {
+				send({ type: 'updateCategory', id: category.id, name: next });
+			}
+		};
+		name.addEventListener('blur', commitName);
+		name.addEventListener('keydown', event => {
+			if (event.key === 'Enter') { name.blur(); }
+			if (event.key === 'Escape') { name.value = category.name; name.blur(); }
+		});
+
+		const remove = el('button', 'remove', '✕');
+		remove.title = 'Delete category';
+		remove.addEventListener('click', () => send({ type: 'deleteCategory', id: category.id }));
+
+		row.appendChild(grip);
+		row.appendChild(colour);
+		row.appendChild(name);
+		row.appendChild(remove);
+		return row;
+	}
+
+	// handing focus back to the grip that had it, once the rebuilt panel is in the document
+	function restoreGripFocus(panel, categoryId) {
+		if (!categoryId) { return; }
+		for (const grip of panel.querySelectorAll('.grip')) {
+			if (grip instanceof HTMLElement && grip.dataset.categoryId === categoryId) {
+				grip.focus();
+				return;
+			}
+		}
+	}
+
 	function buildCategoriesPanel() {
 		const panel = el('div', 'panel');
 		panel.appendChild(el('h2', null, 'Categories'));
 
+		// the rows share one container so a drag has a single list to measure against,
+		// instead of every row hunting for its siblings through the panel
+		const list = el('div', 'cat-list');
 		for (const category of state.categories) {
-			const row = el('div', 'cat-row');
-
-			const colour = document.createElement('input');
-			colour.type = 'color';
-			colour.value = category.colour;
-			colour.title = 'Colour';
-			// 'change' not 'input' — 'input' fires continuously while dragging the picker
-			colour.addEventListener('change', () => {
-				send({ type: 'updateCategory', id: category.id, colour: colour.value });
-			});
-
-			const name = document.createElement('input');
-			name.type = 'text';
-			name.value = category.name;
-			name.spellcheck = false;
-			const commitName = () => {
-				const next = name.value.trim();
-				if (next && next !== category.name) {
-					send({ type: 'updateCategory', id: category.id, name: next });
-				}
-			};
-			name.addEventListener('blur', commitName);
-			name.addEventListener('keydown', event => {
-				if (event.key === 'Enter') { name.blur(); }
-				if (event.key === 'Escape') { name.value = category.name; name.blur(); }
-			});
-
-			const remove = el('button', 'remove', '✕');
-			remove.title = 'Delete category';
-			remove.addEventListener('click', () => send({ type: 'deleteCategory', id: category.id }));
-
-			row.appendChild(colour);
-			row.appendChild(name);
-			row.appendChild(remove);
-			panel.appendChild(row);
+			list.appendChild(buildCategoryRow(category, list));
 		}
+		panel.appendChild(list);
 
 		const add = el('button', 'add', '+ Add category');
 		add.addEventListener('click', () => send({ type: 'createCategory' }));
@@ -245,6 +411,9 @@
 
 		if (!state.categories.length) {
 			panel.appendChild(el('div', 'hint', 'Add a category, then use the ⋯ button on any session to assign it.'));
+		} else if (state.categories.length > 1) {
+			panel.appendChild(el('div', 'hint',
+				'Drag a handle to reorder. That order is the one the ⋯ menu lists, and the one the groups come out in.'));
 		}
 		return panel;
 	}
@@ -551,6 +720,24 @@
 	// still puts a judge in front of every call, the other two put nothing
 	const LOUD = ['autoApprove', 'autopilot'];
 
+	// a chat mid-answer is busy, not asking. it is the one thing the attention border used
+	// to swallow, so it never counts as wanting you — and a chat parked on a confirmation
+	// always does, even in the seconds after you opened it
+	function wantsAttention(session) {
+		return session.turn === 'waiting' || (session.needsAttention && session.turn !== 'working');
+	}
+
+	// the workbench's own name for it: requestNeedsInput is what puts the Needs Input
+	// badge on its agents status bar. amber like the permission pills, because this is
+	// also the chat telling you what it is about to do
+	function needsInputPill() {
+		const pill = el('span', 'pill', 'Needs input');
+		pill.dataset.elevated = 'true';
+		pill.dataset.wants = 'true';
+		pill.title = 'This chat is waiting on your answer. It cannot go any further until you respond.';
+		return pill;
+	}
+
 	// the session button leaves no flag to read — this pill comes from watching the session
 	// file for commands it auto-approved, so it means "as of the last terminal command",
 	// and it goes when the window reloads because the workbench state goes with it
@@ -575,11 +762,13 @@
 
 	function buildRow(session, now) {
 		const category = state.categories.find(c => c.id === session.categoryId);
+		const wants = wantsAttention(session);
 		const row = el('li', 'row');
 		row.tabIndex = 0;
 		row.dataset.sessionId = session.sessionId;
 		row.dataset.state = session.activity;
-		row.dataset.attention = String(Boolean(session.needsAttention));
+		row.dataset.attention = String(wants);
+		if (session.turn) { row.dataset.turn = session.turn; }
 		if (session.archived) { row.classList.add('archived'); }
 		row.setAttribute('role', 'option');
 		row.setAttribute('aria-selected', String(session.sessionId === selectedId));
@@ -597,21 +786,27 @@
 		const top = el('div', 'line');
 		top.appendChild(el('span', 'dot'));
 		const title = el('span', 'title', session.title);
-		if (session.needsAttention) {
+		if (session.turn === 'working') {
+			title.title = 'Working on it now';
+		} else if (wants) {
 			title.title = 'New activity since you last opened this';
 		}
 		if (session.titleOverridden) {
-			// the native list still shows the session's own title — this one is only ours
+			// the native list and the editor tab both still show the session's own title —
+			// this one is only ours, and the ⋯ menu is the way to change theirs
 			title.dataset.overridden = 'true';
-			title.title = session.titleSource === 'manual'
-				? 'Your title. Double-click to edit.'
-				: 'Generated title. Double-click to edit.';
+			title.title = (session.titleSource === 'manual' ? 'Your title' : 'Generated title')
+				+ ', shown here only. Rename in VS Code from the ⋯ menu to change the tab too.'
+				+ ' Double-click to edit.';
 		}
 		title.addEventListener('dblclick', event => {
 			event.stopPropagation();
 			startEdit(row, session, 'title');
 		});
 		top.appendChild(title);
+		if (session.turn === 'waiting') {
+			top.appendChild(needsInputPill());
+		}
 		if (session.autoApproving) {
 			top.appendChild(sessionApprovalPill());
 		}
@@ -667,12 +862,17 @@
 
 		// ── subtitle row ──────────────────────────────────────
 		const hasSubtitle = Boolean(session.subtitle);
+		// 'x ago' on a row that is still being written to is noise — it only ever says a
+		// few seconds, and it says it about the wrong thing
+		const placeholderTail = session.turn === 'working'
+			? 'working…'
+			: relativeTime(session.lastActivityAt, now);
 		const subtitleText = session.generating
 			? 'Generating…'
 			: hasSubtitle
 				? session.subtitle
 				: session.requestCount + (session.requestCount === 1 ? ' request' : ' requests')
-					+ ' · ' + relativeTime(session.lastActivityAt, now);
+					+ ' · ' + placeholderTail;
 
 		const subtitleLine = el('div', 'subtitle-line');
 		const subtitle = el('span',
@@ -817,17 +1017,23 @@
 	function render() {
 		const now = Date.now();
 		closePopovers();
-		// a focused heading is about to be torn out from under itself — remember which
-		// group it belonged to so the rebuilt one below can take focus back
-		const focusedGroupId = document.activeElement && document.activeElement.classList.contains('group')
-			? document.activeElement.dataset.groupId
+		// whatever had focus is about to be torn out from under itself. two things here can
+		// survive that: a group heading, and — one panel over, where a keyboard move repaints
+		// the list the handle lives in — a reorder grip. without the second, the next ↓ in a
+		// run of them has nothing focused left to act on
+		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const focusedGroupId = focused && focused.classList.contains('group')
+			? focused.dataset.groupId
+			: null;
+		const focusedGripId = focused && focused.classList.contains('grip')
+			? focused.dataset.categoryId
 			: null;
 		root.textContent = '';
 
 		const live = state.sessions.filter(session => !session.archived);
 		const archived = state.sessions.filter(session => session.archived);
 		// archived rows are out of sight by definition, so they don't get to ask for you
-		const unread = live.filter(session => session.needsAttention).length;
+		const unread = live.filter(wantsAttention).length;
 
 		const toolbar = el('div', 'toolbar');
 		const categories = el('button', openPanel === 'categories' ? 'active' : null, 'Categories');
@@ -885,7 +1091,9 @@
 		root.appendChild(toolbar);
 
 		if (openPanel === 'categories') {
-			root.appendChild(buildCategoriesPanel());
+			const panel = buildCategoriesPanel();
+			root.appendChild(panel);
+			restoreGripFocus(panel, focusedGripId);
 		} else if (openPanel === 'settings') {
 			root.appendChild(buildSettingsPanel());
 		}
@@ -985,8 +1193,9 @@
 				collapsedGroups: message.collapsedGroups || [],
 				settings: Object.assign({}, DEFAULT_SETTINGS, message.settings)
 			};
-			// a redraw mid-edit would throw away what's being typed
-			if (!editingSubtitleFor) { render(); }
+			// a redraw mid-edit would throw away what's being typed, and one mid-drag would
+			// rebuild the row the pointer is holding. both repaint on their own way out
+			if (!editingSubtitleFor && !draggingCategoryId) { render(); }
 		}
 	});
 

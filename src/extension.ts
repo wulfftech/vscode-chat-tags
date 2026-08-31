@@ -46,6 +46,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 		vscode.commands.registerCommand('chatTags.generateSubtitle', () => provider.generateViaPicker('status')),
 		vscode.commands.registerCommand('chatTags.generateTaskSubtitle', () => provider.generateViaPicker('task')),
 		vscode.commands.registerCommand('chatTags.regenerateTitle', () => provider.generateViaPicker('title')),
+		vscode.commands.registerCommand('chatTags.renameInVsCode', () => provider.renameViaPicker()),
 		vscode.commands.registerCommand('chatTags.archiveSession', () => provider.archiveViaPicker()),
 		vscode.commands.registerCommand('chatTags.deleteSession', () => provider.deleteViaPicker()),
 		vscode.commands.registerCommand('chatTags.toggleGroupByCategory', () => toggleList('groupBy')),

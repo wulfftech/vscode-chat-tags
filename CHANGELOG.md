@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A chat that is mid-answer now reads as busy instead of as unread. Every write an agent makes to its session file used to land as "something happened here", so a chat doing exactly what you asked sat there lit like it needed rescuing. It gets the one signal nothing else in the pane uses — the dot hollows to a ring and breathes — and none of the ones that mean it wants you.
+- A chat parked on a confirmation says so, with a **Needs input** pill. That is VS Code's own reading, the same state behind the **Needs Input** badge on its agents status bar, taken out of the session file rather than guessed at from timing.
+- Neither state is a timer. A turn is open from the moment its request is appended until its result is written, and a window closed mid-answer never writes that result — so a turn only reads as live while the file is still moving. Fifteen chats on this machine are sitting open from windows that are long gone.
+- **Rename in VS Code…** on the row menu. Chat Tags titles are drawn over the list and the editor tab has never seen them, because a tab's label comes from the chat's own title and no API lets one extension relabel another's editor — reopening the tab just reads the old name back. This opens VS Code's own rename box with the Chat Tags title already filled in, so one Enter puts it where the tab, the native list and the session file all read from. The pane then drops its own copy, since the two now agree.
+- Categories can be reordered. Each row in the **Categories** panel has a handle: drag it, or focus it and use ↑ and ↓, and a line shows the gap the row is about to land in. That order is the order the groups come out in when grouping is on, and the order every `⋯` menu lists them, so the categories you reach for most can sit at the top of both. It sticks between windows like the rest of a category.
+- The README shot was painting the **Autopilot**, **Allow all** and **Auto-approving** pills focus-blue while the extension paints them amber. The builder was missing two theme colours the harness already had.
+
 ## 0.14.0
 
 - A category heading can be collapsed, folding its rows out of the way until you open it again. Uncategorised and Archived collapse the same way, and it sticks between windows like every other category setting.

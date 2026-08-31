@@ -48,7 +48,7 @@ const PANES = [
 		id: 'categories',
 		theme: 'dark',
 		height: TALL,
-		caption: 'Categories — name, colour, delete',
+		caption: 'Categories — drag to reorder, name, colour',
 		settings: { sortBy: 'activity', groupBy: 'none', showArchived: false },
 		panel: 'categories'
 	},
@@ -113,6 +113,12 @@ const THEMES = {
 		'--vscode-errorForeground': '#f85149',
 		'--vscode-textLink-foreground': '#4daafc',
 		'--vscode-focusBorder': '#0078d4',
+		// the elevated pills read amber in the product and painted focus-blue here, which
+		// is a hero shot disagreeing with the thing it is advertising. warningForeground is
+		// null in both stock themes, so it stays out and the css falls back the way the real
+		// webview does — same set the harness in build-preview.mjs carries
+		'--vscode-inputValidation-warningBackground': '#352A05',
+		'--vscode-inputValidation-warningBorder': '#B89500',
 		page: '#181818'
 	},
 	light: {
@@ -138,6 +144,8 @@ const THEMES = {
 		'--vscode-errorForeground': '#c72e0f',
 		'--vscode-textLink-foreground': '#005fb8',
 		'--vscode-focusBorder': '#005fb8',
+		'--vscode-inputValidation-warningBackground': '#F6F5D2',
+		'--vscode-inputValidation-warningBorder': '#B89500',
 		page: '#f8f8f8'
 	}
 };

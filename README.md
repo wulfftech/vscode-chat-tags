@@ -40,14 +40,43 @@ Two signals. They never fight, because they're on different axes. That's basical
 |---|---|---|
 | Hue | Which category | Left stripe plus a wash across the whole row |
 | Intensity | Whether it wants you | Resting rows sit at 22%. Attention rows go to 42%. |
+| Motion | Whether it's mid-answer | The dot hollows to a ring and breathes. Nothing else in this view moves. |
 
-**The left border means exactly one thing:** something happened in that session since you last opened it. Attention rows also get max wash, a full-strength dot with a halo, and a heavier title. Nothing else in the view draws a left border, so it can never mean two things at once.
+**The left border means exactly one thing:** something happened in that session since you last opened it, and it has stopped happening. Attention rows also get max wash, a full-strength dot with a halo, and a heavier title. Nothing else in the view draws a left border, so it can never mean two things at once.
 
 Open the session and it clears. **Mark all read** turns up in the toolbar only while there's something to mark, because a button that does nothing is just decoration.
 
 First run stamps a baseline timestamp. Without it every session you've ever opened lights up as unread on install day, which is a hell of a way to say hello.
 
 Colour attaches to the category, not the chat. Inside a webview colours are plain CSS, which answers to nobody's palette rules. Twelve curated ones plus a custom hex field.
+
+## Busy is not the same as wanting you
+
+A chat writes to its file the whole time an agent is working in it. Every one of those writes reads as "something happened here", so a session doing exactly what you asked used to sit there lit up like it needed rescuing — which is how you end up ignoring the rows that genuinely do.
+
+Three states, read off the file rather than off a timer:
+
+| State | What it means | Drawn as |
+|---|---|---|
+| **Working** | A request is open and no result has been written for it | Ring dot, breathing. No border, no bold, resting wash. |
+| **Needs input** | That open request is parked on a confirmation | Everything an attention row gets, plus an amber pill |
+| **Finished** | The result landed, and you haven't looked since | The attention row, as it always was |
+
+A working session doesn't count towards **Mark all read** either. It isn't unread yet — it hasn't finished saying anything.
+
+### Where the reading comes from
+
+A turn opens when a request is appended to the session file and closes when its result is written. In between, `modelState` gets patched per request: `0` running, `1` completed, `2` cancelled, `3` errored, and `4` parked waiting for you. That last one is the workbench's own `requestNeedsInput`, the thing behind the **Needs Input** badge on its agents status bar — the same signal, read from the other side of the wall.
+
+Only the patch log tells the truth about it. The whole-session serialiser rewrites both `0` and `4` to `2` on the way out, so a header restored from disk claims every unfinished turn was cancelled.
+
+Two things had to be handled, and both were found in real files rather than guessed at:
+
+**A reopened session lies about old turns.** Open a chat that's been sitting for months and it re-emits `4` for every request still holding a "Continue to iterate?" widget nobody ever clicked — seven at once in the largest session here. All of them land after their own result, which is the only thing separating them from a live one. So a state record only counts while a turn is actually open.
+
+**A turn left open is not the same as a turn in flight.** Close a window mid-answer and the result that would have closed the turn never gets written, so it stays open for good. Fifteen sessions on this disk are sitting like that. The state only reads as live when the file has also moved inside `chatTags.recentMinutes`, and the youngest abandoned turn here is sixty hours stale — the cutoff has room to spare.
+
+One limit worth knowing: a chat that was already mid-answer when the window opened is read from the tail of its file, which covers the common case and not a turn whose opening request is megabytes back. It sorts itself out on the next message either way.
 
 ## Which sessions can run things without asking
 
@@ -79,7 +108,9 @@ Two orders, in the sort menu:
 
 Both newest first. And they are not the same bloody list — across 23 real sessions barely a third land in the same place under both, because a chat you started in July and picked up yesterday sits at opposite ends of them.
 
-**Group by category** puts a heading above each category's sessions, in the order you defined them, with everything unassigned dumped under **Uncategorised** at the bottom. Point a session at a category you deleted and it lands there too. Where else would it go.
+**Group by category** puts a heading above each category's sessions, in whatever order the categories sit in, with everything unassigned dumped under **Uncategorised** at the bottom. Point a session at a category you deleted and it lands there too. Where else would it go.
+
+That order is yours to set. Each row in the **Categories** panel has a handle on the left: drag it, or focus it and use ↑ and ↓, and a line shows the gap the row is about to land in. The same order drives the list in every `⋯` menu, so the categories you reach for most can sit at the top of both.
 
 ## Archiving and deleting
 
@@ -142,7 +173,19 @@ The armed state lives in the view, not in the session record, so a repaint from 
 
 **Chat Tags never writes to the session file.** VS Code holds it open and appends to it. A record written underneath gets clobbered on the next flush, and a half-written line takes the whole session with it. Not worth it for a rename, or for anything else.
 
-So titles live in extension state and get drawn over the top, whether you wrote it or the model did. A dotted underline marks a title as ours rather than the session's own. Clear the field and it drops. The native Chat list carries on showing the original either way — no API to change it, same wall the colours hit.
+So titles live in extension state and get drawn over the top, whether you wrote it or the model did. A dotted underline marks a title as ours rather than the session's own. Clear the field and it drops.
+
+The native Chat list and the editor tab both carry on showing the original. The tab's label comes from the chat model's own title, and `Tab.label` is readonly — there is no API anywhere that lets one extension relabel another's editor. Closing the tab and opening it again just reads the same value back.
+
+### Making a rename stick everywhere
+
+**Rename in VS Code…**, on the row menu, opens the workbench's own rename box with the Chat Tags title already in it. One Enter and it goes through the same call the built-in **Rename** uses, which is what the editor tab, the native list and the session file all read from. The pane then notices its own copy has become redundant and drops it, dotted underline and all.
+
+Two honest limits.
+
+The box can't be skipped. The only other things that reach that call are a chat slash command registered with the chat registry rather than the command registry, and the agent-host title sync — neither reachable from out here.
+
+And VS Code writes the title into the session file only for a chat it currently has loaded. Rename one that isn't open and the native list and the next tab that opens it both update, while this pane carries on showing what it was showing.
 
 ### Which model
 
@@ -224,7 +267,7 @@ Everything lives **in the pane**. The view title bar and the Settings UI get not
 
 | Button | What it does |
 |---|---|
-| Categories | Opens the category list — colour, name, delete |
+| Categories | Opens the category list — order, colour, name, delete |
 | `+` | Starts a new chat |
 | Sort | Order, grouping, archived |
 | Gear | Everything else |
@@ -234,13 +277,13 @@ Order and grouping get their own menu instead of a row of radio buttons behind t
 
 Whichever panel is open, its button stays lit until you click it again. That's the only way to close it, so it has to read as pressed rather than merely hovered.
 
-The `⋯` button on a row, or right-click, holds the category list, then **Archive** and **Delete…** under a separator. Everything else on a row is its own button, revealed on hover: a pencil and a refresh on the title, a pencil and two generate buttons on the subtitle. They collapse to zero width when you're not hovering, because holding their place cost every title about 60px for absolutely nothing.
+The `⋯` button on a row, or right-click, holds the category list, then **Rename in VS Code…**, **Archive** and **Delete…** under a separator. Everything else on a row is its own button, revealed on hover: a pencil and a refresh on the title, a pencil and two generate buttons on the subtitle. They collapse to zero width when you're not hovering, because holding their place cost every title about 60px for absolutely nothing.
 
 Titles and subtitles get edited through their pencils, or by double-clicking the title. Neither is a click target — the whole row opens the session, and an edit affordance covering half the row turned that into a coin flip. Clearing the title field restores the session's own.
 
 | Control | Backed by |
 |---|---|
-| Category colour, name, delete | Extension global state |
+| Category order, colour, name, delete | Extension global state |
 | When a session is clicked | `chatTags.openTarget` |
 | Width (dedicated column only) | `chatTags.dedicatedColumnRatio` |
 | Bright while active for | `chatTags.activeSeconds` |

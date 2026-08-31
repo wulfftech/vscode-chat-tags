@@ -100,6 +100,11 @@
 				"category": "Chat Tags"
 			},
 			{
+				"command": "chatTags.renameInVsCode",
+				"title": "Rename Session in VS Code",
+				"category": "Chat Tags"
+			},
+			{
 				"command": "chatTags.archiveSession",
 				"title": "Archive Session",
 				"category": "Chat Tags"
@@ -231,6 +236,8 @@
 		"probe:exchange": "node scripts/probe-exchange.mjs",
 		"probe:archive": "node scripts/probe-archive.mjs",
 		"probe:fork-header": "node scripts/probe-fork-header.mjs",
+		"probe:turn": "node scripts/probe-turn.mjs",
+		"probe:order": "node scripts/probe-order.mjs",
 		"package": "npm run clean && tsc -p ./ && vsce package",
 		"clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\""
 	},

@@ -7,9 +7,9 @@ import { readArchivedSessionIds, stateDbBeside } from '../core/archiveSeed';
 import { ChatSessionInfo, activityStateOf, compareSessions, listSessions } from '../core/sessions';
 import { PALETTE, TagStore } from '../model/categories';
 import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
-import { deleteSession, newSession, openSession } from '../navigation';
+import { deleteSession, newSession, openSession, renameSession } from '../navigation';
 import { isDefaultPermission } from '../core/permissions';
-import { SessionApprovalTracker } from '../core/sessionApproval';
+import { OpenTurn, SessionLiveTracker } from '../core/sessionLive';
 import { GenerationMode } from '../core/subtitleText';
 import { SubtitleService } from '../subtitles';
 
@@ -25,6 +25,10 @@ const REFRESH_DEBOUNCE_MS = 400;
 // takes to type it
 const NEW_SESSION_GRACE_MS = 5 * 60_000;
 
+// how long a rename handed to VS Code stays eligible to be adopted. the workbench saves
+// the session on its own schedule, so customTitle lands a refresh or three later
+const RENAME_GRACE_MS = 60_000;
+
 interface RenderedSession {
 	sessionId: string;
 	title: string;
@@ -39,6 +43,9 @@ interface RenderedSession {
 	activity: string;
 	categoryId?: string;
 	needsAttention: boolean;
+	// the turn in flight right now, absent on a session that isn't mid-answer. 'working'
+	// is the state the attention border used to swallow: a chat that is busy, not asking
+	turn?: OpenTurn;
 	generating: boolean;
 	archived: boolean;
 	// absent on a default session, so the common row carries nothing extra and the view
@@ -64,7 +71,7 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 
 	private view?: vscode.WebviewView;
 	private sessions: ChatSessionInfo[] = [];
-	private readonly approvals = new SessionApprovalTracker();
+	private readonly liveState = new SessionLiveTracker();
 	private timer?: NodeJS.Timeout;
 	// which row draws as selected. the pane cannot read editor focus — a chat editor
 	// reaches the tabs api as TabInputKind.Unknown, so tab.input is undefined and carries
@@ -75,6 +82,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 	private awaitingNewSession = false;
 	private knownBeforeNewChat = new Set<string>();
 	private awaitingUntil = 0;
+	// a rename handed to VS Code, waiting for its customTitle to reach the session file
+	private pendingRename?: { sessionId: string; before: string; until: number };
 	// the watcher fires once per append, and an active chat appends constantly. these
 	// hold the storm to one scan at a time with at most one more queued behind it
 	private refreshTimer?: NodeJS.Timeout;
@@ -169,11 +178,38 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		})));
 		this.sessions = perDirectory.flat().sort((a, b) => b.lastActivityAt - a.lastActivityAt);
 		await this.seedArchiveOnce();
-		// the first pass only records where the files already ended — see the tracker for
-		// why anything written before this window started cannot be read as live
-		await this.approvals.update(this.sessions);
+		// the first pass reads only the tail of each file — see the tracker for why an
+		// approval written before this window started cannot be read as live, and why a
+		// turn left open by it still can be
+		await this.liveState.update(this.sessions);
 		this.adoptNewSession();
+		await this.adoptRename();
 		this.post();
+	}
+
+	// VS Code writes customTitle only for a session whose model it currently has loaded,
+	// and it writes it on its own save schedule — so a rename lands some refreshes after
+	// the command resolved, or never, for a chat that isn't open. once it does land, our
+	// copy is drawing over a title that already says the same thing, and the dotted
+	// underline would be claiming otherwise
+	private async adoptRename(): Promise<void> {
+		const pending = this.pendingRename;
+		if (!pending) {
+			return;
+		}
+		if (Date.now() > pending.until) {
+			this.pendingRename = undefined;
+			return;
+		}
+		const session = this.sessions.find(entry => entry.sessionId === pending.sessionId);
+		if (!session || session.title === pending.before) {
+			return;
+		}
+		this.pendingRename = undefined;
+		this.log.appendLine(`[rename] ${pending.sessionId} -> "${session.title}" landed in the session file`);
+		if (this.tags.meta(pending.sessionId).title) {
+			await this.tags.setTitle(pending.sessionId, undefined, 'manual');
+		}
 	}
 
 	// the chat the + button started shows up seconds later, once the user has sent
@@ -241,6 +277,13 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		const inFlight = new Set(this.subtitles.inFlight);
 		const all: RenderedSession[] = this.sessions.map(session => {
 			const meta = this.tags.meta(session.sessionId);
+			// a turn that has gone quiet for longer than 'recent' is not in flight, it is
+			// abandoned — a window closed mid-answer never writes the result that would
+			// have closed it. all twelve sessions sitting turn-open on this machine were
+			// at least a day stale, so the cutoff has room to spare
+			const turn = now - session.lastActivityAt <= thresholds.recentMs
+				? this.liveState.openTurn(session.sessionId)
+				: undefined;
 			return {
 				sessionId: session.sessionId,
 				title: meta.title ?? session.title,
@@ -254,12 +297,13 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				activity: activityStateOf(session, now, thresholds),
 				categoryId: meta.categoryId,
 				needsAttention: this.tags.needsAttention(session.sessionId, session.lastActivityAt),
+				turn,
 				generating: inFlight.has(session.sessionId),
 				archived: Boolean(meta.archivedAt),
 				permissionLevel: isDefaultPermission(session.permissionLevel)
 					? undefined
 					: session.permissionLevel,
-				autoApproving: this.approvals.isApproving(session.sessionId) || undefined
+				autoApproving: this.liveState.isApproving(session.sessionId) || undefined
 			};
 		});
 
@@ -342,6 +386,42 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		return picked?.sessionId;
 	}
 
+	async renameViaPicker(): Promise<void> {
+		const sessionId = await this.pickSession('Rename which session in VS Code?');
+		if (sessionId) {
+			await this.renameInVsCode(sessionId);
+		}
+	}
+
+	// hands the title we are showing to VS Code's own rename box, prefilled, so one Enter
+	// puts it where the editor tab and the native list read from. see navigation.ts for
+	// why there is a box in the way at all
+	private async renameInVsCode(sessionId: string): Promise<void> {
+		const session = this.sessions.find(entry => entry.sessionId === sessionId);
+		if (!session) {
+			return;
+		}
+		try {
+			await renameSession(sessionId, this.tags.meta(sessionId).title ?? session.title);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.log.appendLine(`[rename] ${sessionId} failed: ${message}`);
+			const choice = await vscode.window.showWarningMessage(
+				'Chat Tags could not open VS Code’s rename box. The workbench command may have changed in this VS Code version.',
+				'Show Log'
+			);
+			if (choice === 'Show Log') {
+				this.log.show(true);
+			}
+			return;
+		}
+
+		// the command resolves whether the box was confirmed or dismissed, so the session
+		// file is the only honest evidence — same as delete. adoptRename watches for it
+		this.pendingRename = { sessionId, before: session.title, until: Date.now() + RENAME_GRACE_MS };
+		await this.refresh();
+	}
+
 	async generateViaPicker(mode: GenerationMode): Promise<void> {
 		const sessionId = await this.pickSession(mode === 'title'
 			? 'Regenerate the title of which session?'
@@ -398,6 +478,9 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 			case 'setTitle':
 				await this.tags.setTitle(message.sessionId, message.text, 'manual');
 				return;
+			case 'renameInVsCode':
+				await this.renameInVsCode(message.sessionId);
+				return;
 			case 'openInExtensions':
 				await openInExtensions();
 				return;
@@ -409,6 +492,11 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 					...(message.name !== undefined ? { name: message.name } : {}),
 					...(message.colour !== undefined ? { colour: message.colour } : {})
 				});
+				return;
+			case 'moveCategory':
+				// beforeId null means the end of the list — the pane sends what its drop line
+				// was drawn against, and a line past the last row has nothing to name
+				await this.tags.moveCategory(message.id, message.beforeId ?? undefined);
 				return;
 			case 'deleteCategory':
 				await this.confirmDelete(message.id);
