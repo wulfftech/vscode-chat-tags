@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
 
 - With the list grouped by category, a chat moves between groups by being dragged there. The group under the pointer lights up as the place it will land, **Uncategorised** is a target like any other so dragging out clears a chat's category, and the list scrolls itself when you get near an edge. A click still opens the chat — a press only counts as a drag once the pointer has gone further than a click ever would.
 
