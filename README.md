@@ -112,6 +112,10 @@ Both newest first. And they are not the same bloody list — across 23 real sess
 
 That order is yours to set. Each row in the **Categories** panel has a handle on the left: drag it, or focus it and use ↑ and ↓, and a line shows the gap the row is about to land in. The same order drives the list in every `⋯` menu, so the categories you reach for most can sit at the top of both.
 
+With the list in groups, a chat moves between them by being dragged there. Pick one up, and the group under the pointer lights up as the place it will land; let go and it belongs to that category. **Uncategorised** is a target like any other, so dragging out is how you take a category off a chat. The **Archived** block is not — archiving is its own thing and lives on the `⋯` menu.
+
+A row still opens the chat when you click it. A press only becomes a drag once the pointer has moved far enough that it cannot have been meant as a click, and the click that would otherwise follow the drop is thrown away — releasing a chat onto a heading should not also fold that heading away.
+
 ## Archiving and deleting
 
 Two completely different things. They work differently on purpose.

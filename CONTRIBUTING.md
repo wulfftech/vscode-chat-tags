@@ -319,6 +319,42 @@ A keyboard move repaints the panel, which destroys the handle that has focus —
 
 **Verified in the browser harness, not in a live VS Code window.** A real mouse drag through the harness emitted the right move; the drop-line placement, the no-op suppression, the escape and click-only exits, every keyboard case and the focus restoration were driven with scripted pointer and key events against the real compiled `view.js`. Reversing the stored order and rebuilding the harness confirmed both the group headings and the row menu follow it. VS Code's own webview host and screen-reader behaviour were not exercised.
 
+## Dragging a chat into another group
+
+The list is one flat run of `<li>`s — headings and rows in draw order — so a group owns everything from its own heading down to the next one. `groupUnder()` walks that run and returns the heading owning the first node whose bottom is past the pointer, which handles the pointer being on a heading, on a row, above the list or below the last row without any of them being special cases.
+
+**The whole group lights up, not a line between two rows.** A chat goes *into* a category; where it lands inside one is the sort order's call, not the drop's. So there is no insertion point to draw, and a line would promise a precision the drop does not have.
+
+**The tint is an overlay, not a background.** A row's background is already carrying its category wash, or its hover state, or its selection — three different things, and `color-mix` on top of any of them lands somewhere different each time. `.row[data-drop-into]::after` composites over whatever is there, so the drop target reads the same in all three.
+
+Three places are not drop targets, and none of them highlights: the archived block (archiving is not a category, and it has its own menu entry), an archived row being dragged (it would land in a category it is not shown in), and the group the chat is already in. The `groupId` comparison folds the last one in with the pseudo-groups — a row with no `data-category` counts as `'uncategorised'`, and no real id can collide with that because they all come out of `makeId()` as `cat_<random>`.
+
+### Not stealing the click
+
+A row opens the chat when you click it, which is the whole point of the row, so a drag has to be able to prove it was not one. Two guards:
+
+**A press only becomes a drag past 4px of travel.** Below that nothing happens at all — no capture, no chip, no listeners removed from anything — and the row's own click handler runs exactly as it did before.
+
+**The click after a drop is swallowed.** The browser sends one whether or not you meant it, and over a heading that click would fold the group away — so the drop installs a one-shot capture-phase listener on the document and takes it back off on the next turn of the event loop, whether or not a click ever arrives.
+
+### Why the listeners are on the document
+
+`pointermove`, `pointerup` and `pointercancel` all go on the document rather than the row. A press that flicks straight off the row would otherwise never see its own `pointerup`, and the listeners would leak.
+
+The pointer is captured, but **only once the drag is real** — not at `pointerdown`. Capturing retargets the compatibility mouse events too, and double-clicking a title to edit it goes through those. Capture is also wrapped in a `try`, because losing it costs the drag nothing inside the pane, which is where it happens, and is not worth taking the press down over.
+
+### Autoscroll
+
+A group off the bottom of the pane cannot be reached by the pointer alone, and a list long enough to want grouping is long enough to need this. A `requestAnimationFrame` loop reads the last known pointer position each frame and scrolls when it is within 36px of an edge. The repaint after each scroll is the part that is easy to miss: the rows have moved under a pointer that has not, so the drop target has changed even though nothing was moved.
+
+### Empty categories
+
+A category with no chats in it draws no group, so there is nowhere to drop one to put the first chat in it. That is deliberate rather than overlooked — revealing empty headings mid-drag would move the list under the pointer, which is worse than the dead end it fixes. The `⋯` menu assigns a category without needing one on screen.
+
+**Verified in the browser harness, not in a live VS Code window.** Real mouse drags emitted the right assignment and left no state behind; a real click still opened the chat. Scripted pointer events covered every branch: onto a heading, onto a row in another group, onto the group it is already in, onto Uncategorised, onto Archived, escaped mid-drag, pressed without moving, moved under the threshold, and a row in an ungrouped list carrying no drag at all. The autoscroll was watched running the harness to the bottom of a 3,200px list. VS Code's own webview host and screen-reader behaviour were not exercised.
+
+There is no probe for this one. Everything it decides — which group the pointer is in, whether that group can take the chat, how far to scroll — lives in `media/view.js` and reaches nothing a node script can require. What it ends up sending is `setCategory`, which is the same message the `⋯` menu has always sent.
+
 ## Icons
 
 One source logo, three derivatives, built by `scripts/build-icons.ps1`:

@@ -527,6 +527,55 @@ button {
 	accent-color: var(--vscode-focusBorder);
 }
 
+/* ── dragging a chat into another group ──────────────────────────────────── */
+
+.row.dragging {
+	opacity: 0.4;
+}
+
+/* the tint is an overlay rather than a background, because a row's background is already
+   carrying its category wash, its hover state or its selection — and the drop target has
+   to read the same on all of them */
+.group[data-drop-into]::after,
+.row[data-drop-into]::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+
+/* the heading is the half that names where the chat is going, so it takes the outline
+   and the stronger tint; its rows only have to read as belonging to it */
+.group[data-drop-into] {
+	color: var(--vscode-foreground);
+}
+
+.group[data-drop-into]::after {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 26%, transparent);
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+}
+
+/* what the pointer is carrying. the row it came from can be scrolled out of sight by the
+   time it lands, and a dimmed row you cannot see says nothing */
+.drag-chip {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 9;
+	max-width: 200px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	padding: 3px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	pointer-events: none;
+	color: var(--vscode-foreground);
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 /* category assignment popover, anchored under the row's ⋯ button */
 .popover {
 	position: absolute;
@@ -1000,6 +1049,8 @@ function mount(hostId, listSettings) {
 	// deferred — the list is torn down and rebuilt on every render, and rebuilding it under
 	// a captured pointer would leave the drag holding an element that is no longer in the dom
 	let draggingCategoryId = null;
+	// and the chat being dragged from one group into another, held for the same reason
+	let draggingSessionId = null;
 
 	// inline svg rather than text glyphs — a glyph renders at whatever weight the user's
 	// font decides, and ⚙ in particular lands as an emoji on some systems
@@ -1893,6 +1944,12 @@ function mount(hostId, listSettings) {
 		row.appendChild(top);
 		row.appendChild(subtitleLine);
 
+		// there is somewhere to drag a chat to only while the list is in groups, and the
+		// archived block at the bottom is not one of the places it could go
+		if (state.settings.groupBy === 'category' && !session.archived) {
+			row.addEventListener('pointerdown', event => startSessionDrag(event, row));
+		}
+
 		row.addEventListener('click', () => open(session.sessionId));
 		row.addEventListener('contextmenu', event => {
 			event.preventDefault();
@@ -1904,6 +1961,187 @@ function mount(hostId, listSettings) {
 	function open(sessionId) {
 		selectedId = sessionId;
 		send({ type: 'open', sessionId });
+	}
+
+	// ── dragging a chat into another group ────────────────────
+
+	// a row opens the chat when you click it, so a press only becomes a drag once the
+	// pointer has travelled far enough that it cannot have been meant as a click
+	const DRAG_THRESHOLD = 4;
+	// how close to an edge of the pane the pointer has to get before the list starts
+	// scrolling itself, and the most it moves in one frame while it is right on the edge
+	const AUTOSCROLL_EDGE = 36;
+	const AUTOSCROLL_STEP = 14;
+
+	// which group the pointer is inside. the list is one flat run of headings and rows, so
+	// a group owns everything from its own heading down to the next one
+	function groupUnder(list, clientY) {
+		let current = null;
+		for (const node of list.children) {
+			if (node.classList.contains('group')) { current = node; }
+			if (clientY < node.getBoundingClientRect().bottom) { return current; }
+		}
+		return current;
+	}
+
+	// the archived block is not a category, an archived chat has nowhere to go, and a chat
+	// is already in its own group. no id can collide with the two pseudo-groups either —
+	// real ones come out of makeId() as cat_<random>
+	function canDropInto(row, group) {
+		if (!group || group.dataset.groupId === 'archived' || row.classList.contains('archived')) {
+			return false;
+		}
+		return group.dataset.groupId !== (row.dataset.category || 'uncategorised');
+	}
+
+	// the whole group lights up rather than a line between two rows: a chat goes *into* a
+	// category, not to a position, and where it lands inside one is the sort order's call
+	function paintDropGroup(list, row, group) {
+		for (const node of list.children) { delete node.dataset.dropInto; }
+		if (!canDropInto(row, group)) { return; }
+		group.dataset.dropInto = 'head';
+		for (let node = group.nextElementSibling; node; node = node.nextElementSibling) {
+			if (node.classList.contains('group')) { break; }
+			node.dataset.dropInto = 'member';
+		}
+	}
+
+	// how far to scroll this frame, from how close the pointer is to an edge
+	function edgePush(clientY) {
+		const height = document.documentElement.clientHeight;
+		if (clientY < AUTOSCROLL_EDGE) {
+			return -Math.ceil(Math.min(AUTOSCROLL_STEP, (AUTOSCROLL_EDGE - clientY) / 2));
+		}
+		if (clientY > height - AUTOSCROLL_EDGE) {
+			return Math.ceil(Math.min(AUTOSCROLL_STEP, (clientY - height + AUTOSCROLL_EDGE) / 2));
+		}
+		return 0;
+	}
+
+	// the row it came from can be scrolled off the top by the time it lands, and a dimmed
+	// row you cannot see is not feedback. so the title comes along under the pointer
+	function dragChip(text, x, y) {
+		const chip = el('div', 'drag-chip', text);
+		moveChip(chip, x, y);
+		document.body.appendChild(chip);
+		return chip;
+	}
+
+	function moveChip(chip, x, y) {
+		chip.style.transform = 'translate(' + (x + 12) + 'px, ' + (y + 14) + 'px)';
+	}
+
+	// listeners go on the document rather than the row, so a press that flicks straight off
+	// the row still gets its pointerup and cleans up after itself. the pointer is only
+	// captured once this is a real drag — capturing sooner would retarget the compatibility
+	// mouse events too, and double-clicking a title to edit it goes through those
+	function startSessionDrag(event, row) {
+		if (event.button !== 0) { return; }
+		// the row's own buttons and its inline editors are not drag handles
+		if (event.target instanceof Element && event.target.closest('button, input, textarea')) { return; }
+		const list = row.closest('.list');
+		if (!list) { return; }
+
+		const fromX = event.clientX;
+		const fromY = event.clientY;
+		let x = fromX;
+		let y = fromY;
+		let group = null;
+		let chip = null;
+		let dragging = false;
+		let committing = true;
+		let frame = 0;
+
+		const paint = () => {
+			group = groupUnder(list, y);
+			paintDropGroup(list, row, group);
+		};
+
+		const move = moved => {
+			x = moved.clientX;
+			y = moved.clientY;
+			if (!dragging) {
+				if (Math.abs(x - fromX) < DRAG_THRESHOLD && Math.abs(y - fromY) < DRAG_THRESHOLD) {
+					return;
+				}
+				dragging = true;
+				draggingSessionId = row.dataset.sessionId;
+				row.classList.add('dragging');
+				const titled = row.querySelector('.title');
+				chip = dragChip(titled ? titled.textContent : '', x, y);
+				try {
+					row.setPointerCapture(moved.pointerId);
+				} catch (error) {
+					// without capture the drag still works inside the pane, which is where it
+					// happens. losing it is not worth taking the press down over
+				}
+				frame = requestAnimationFrame(scroll);
+			}
+			moveChip(chip, x, y);
+			paint();
+		};
+
+		// a group off the bottom of the pane cannot be reached by the pointer alone, and a
+		// list long enough to need grouping is long enough to need this
+		const scroll = () => {
+			frame = requestAnimationFrame(scroll);
+			const by = edgePush(y);
+			if (!by) { return; }
+			const before = window.scrollY;
+			window.scrollBy(0, by);
+			// the rows have moved under a pointer that has not, so the target has changed
+			if (window.scrollY !== before) { paint(); }
+		};
+
+		const stop = () => {
+			document.removeEventListener('pointermove', move);
+			document.removeEventListener('pointerup', stop);
+			document.removeEventListener('pointercancel', abort);
+			document.removeEventListener('keydown', abort, true);
+			row.removeEventListener('lostpointercapture', abort);
+			if (!dragging) { return; }
+			cancelAnimationFrame(frame);
+
+			const landed = committing && canDropInto(row, group);
+			const into = group ? group.dataset.groupId : null;
+			if (chip) { chip.remove(); }
+			row.classList.remove('dragging');
+			for (const node of list.children) { delete node.dataset.dropInto; }
+			draggingSessionId = null;
+
+			// letting go of a chat is not clicking it, but the browser sends a click either
+			// way — and over a heading that click would fold the group away. swallowed once,
+			// and the listener goes on the next turn whether or not one ever arrives
+			const swallow = clicked => { clicked.stopPropagation(); clicked.preventDefault(); };
+			document.addEventListener('click', swallow, true);
+			setTimeout(() => document.removeEventListener('click', swallow, true), 0);
+
+			if (landed) {
+				send({
+					type: 'setCategory',
+					sessionId: row.dataset.sessionId,
+					categoryId: into === 'uncategorised' ? null : into
+				});
+			} else {
+				// nothing changed, so nothing is coming back to repaint this — and a repaint
+				// may have been held off while the pointer was down
+				render();
+			}
+		};
+
+		// escape gets the same exit as a cancelled pointer, the way it does in the category
+		// list. lostpointercapture is the backstop for a drag that never sees its pointerup
+		const abort = ended => {
+			if (ended.type === 'keydown' && ended.key !== 'Escape') { return; }
+			committing = false;
+			stop();
+		};
+
+		document.addEventListener('pointermove', move);
+		document.addEventListener('pointerup', stop);
+		document.addEventListener('pointercancel', abort);
+		document.addEventListener('keydown', abort, true);
+		row.addEventListener('lostpointercapture', abort);
 	}
 
 	// group headings are focusable stops too, so arrow keys walk the visible list in the
@@ -2171,7 +2409,7 @@ function mount(hostId, listSettings) {
 			};
 			// a redraw mid-edit would throw away what's being typed, and one mid-drag would
 			// rebuild the row the pointer is holding. both repaint on their own way out
-			if (!editingSubtitleFor && !draggingCategoryId) { render(); }
+			if (!editingSubtitleFor && !draggingCategoryId && !draggingSessionId) { render(); }
 		}
 	});
 

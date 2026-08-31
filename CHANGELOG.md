@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- With the list grouped by category, a chat moves between groups by being dragged there. The group under the pointer lights up as the place it will land, **Uncategorised** is a target like any other so dragging out clears a chat's category, and the list scrolls itself when you get near an edge. A click still opens the chat — a press only counts as a drag once the pointer has gone further than a click ever would.
+
 ## 0.15.0
 
 - A chat that is mid-answer now reads as busy instead of as unread. Every write an agent makes to its session file used to land as "something happened here", so a chat doing exactly what you asked sat there lit like it needed rescuing. It gets the one signal nothing else in the pane uses — the dot hollows to a ring and breathes — and none of the ones that mean it wants you.

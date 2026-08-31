@@ -521,6 +521,55 @@ button {
 	accent-color: var(--vscode-focusBorder);
 }
 
+/* ── dragging a chat into another group ──────────────────────────────────── */
+
+.row.dragging {
+	opacity: 0.4;
+}
+
+/* the tint is an overlay rather than a background, because a row's background is already
+   carrying its category wash, its hover state or its selection — and the drop target has
+   to read the same on all of them */
+.group[data-drop-into]::after,
+.row[data-drop-into]::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: color-mix(in srgb, var(--vscode-focusBorder) 12%, transparent);
+}
+
+/* the heading is the half that names where the chat is going, so it takes the outline
+   and the stronger tint; its rows only have to read as belonging to it */
+.group[data-drop-into] {
+	color: var(--vscode-foreground);
+}
+
+.group[data-drop-into]::after {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 26%, transparent);
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+}
+
+/* what the pointer is carrying. the row it came from can be scrolled out of sight by the
+   time it lands, and a dimmed row you cannot see says nothing */
+.drag-chip {
+	position: fixed;
+	top: 0;
+	left: 0;
+	z-index: 9;
+	max-width: 200px;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	padding: 3px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	pointer-events: none;
+	color: var(--vscode-foreground);
+	background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+	box-shadow: inset 0 0 0 1px var(--vscode-focusBorder), 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 /* category assignment popover, anchored under the row's ⋯ button */
 .popover {
 	position: absolute;
