@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.0
+
+- **Show model and context**, in the sort menu, puts the model each chat is set to at the end of its row, with a bar and a percentage for how full that model's context window is. Both come out of the chat's own file: the picker's value, and the size of the last prompt it sent. It goes amber past three-quarters and red past nine-tenths, which is where a long chat starts quietly dropping its own early history. Off by default.
+- That percentage is one prompt, not a running total — it climbs through a turn as tool results pile onto it and drops back when the conversation gets trimmed. Chats whose provider never records a size show the model alone rather than a made-up number, and a chat set to **Auto** reads *Auto*, because that is genuinely what it is set to.
+- Chats can be selected in bulk and archived in one go. Ctrl-click or shift-click rows, or take a whole group from the tick on its heading, and a bar replaces the toolbar with **Archive** and **Restore** counting only the chats each would actually move. Dragging any ticked row carries the whole set into the group you drop it on.
+- Groups you have collapsed can still be selected whole — the heading knows its chats whether or not their rows are drawn.
+- Right-clicking a row opens its menu where you clicked, rather than always under the `⋯` button at the far right of the pane. It flips above the pointer when the row you used is near the bottom, and a menu raised from the keyboard — Shift+F10, or the Menu key — lands on the row rather than in the corner.
+
 ## 0.16.0
 
 - With the list grouped by category, a chat moves between groups by being dragged there. The group under the pointer lights up as the place it will land, **Uncategorised** is a target like any other so dragging out clears a chat's category, and the list scrolls itself when you get near an edge. A click still opens the chat — a press only counts as a drag once the pointer has gone further than a click ever would.
