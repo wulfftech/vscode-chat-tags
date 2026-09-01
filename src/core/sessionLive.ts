@@ -43,17 +43,33 @@ const MODEL_STATE = ',"modelState"],"v":{"value":';
 const RUNNING = 0x30; // '0'
 const NEEDS_INPUT = 0x34; // '4'
 
-// all five needles were counted two ways across the 132 MB of session files on this
-// machine — raw byte search against a structural pass over record heads — and agreed
-// exactly: 208 appends, 192 results, 264 model states. none of them can appear inside a
-// payload, because every quote in a json string is escaped and all five carry bare ones
+// ── context usage ────────────────────────────────────────────────────────────
+
+// how big the prompt was for the newest turn, patched over and over while that turn runs
+// — eleven times in one request in the largest file here, fifty-two in another. it is the
+// only number in a session file that moves while you watch it, which is exactly why it is
+// read from the tail: the newest one sits at the end of a file that is tens of megabytes
+//
+// the closing bracket is part of the needle so promptTokenDetails, which shares the
+// prefix and carries an array of percentages, cannot be mistaken for it
+const PROMPT_TOKENS = ',"promptTokens"],"v":';
+// 999 billion tokens is not a prompt, so a longer run than this is a malformed record
+const MAX_TOKEN_DIGITS = 12;
+
+// all six needles were counted two ways across the session files on this machine — raw
+// byte search against a structural pass over record heads — and agreed exactly: 208
+// appends, 192 results, 264 model states, and 1102 prompt sizes over 120 MB. none of
+// them can appear inside a payload, because every quote in a json string is escaped and
+// all six carry bare ones
 const NEEDLE_LENGTHS = [
 	APPROVAL_MARKER.length,
 	TERMINAL_TOOL.length,
 	REQUEST_APPEND.length,
 	REQUEST_RESULT.length,
 	// the model state needs the digit after it, so it straddles one byte further
-	MODEL_STATE.length + 1
+	MODEL_STATE.length + 1,
+	// and the prompt size needs its whole run of digits
+	PROMPT_TOKENS.length + MAX_TOKEN_DIGITS
 ];
 
 const CHUNK_BYTES = 256 * 1024;
@@ -76,6 +92,10 @@ export interface TailScan {
 	// the turn state those bytes leave the session in. carried in as well as out, because
 	// a delta can easily hold no turn record at all
 	open?: OpenTurn;
+	// newest prompt size in those bytes, absent when they carried none. unlike the turn
+	// state this is never carried in: absent means "these bytes said nothing", and the
+	// caller keeps whatever it already knew
+	promptTokens?: number;
 	// only ever advanced to a record boundary, so a half-written line is re-read next time
 	offset: number;
 }
@@ -112,6 +132,7 @@ export async function scanTail(filePath: string, from: number, open?: OpenTurn):
 		let scannedTo = from;
 		let pendingMarker = false;
 		let approving: boolean | undefined;
+		let promptTokens: number | undefined;
 		let lastNewline = -1;
 
 		while (position < size) {
@@ -153,6 +174,12 @@ export async function scanTail(filePath: string, from: number, open?: OpenTurn):
 									: undefined;
 						}
 						break;
+					case 'tokens':
+						// no open-turn guard here, unlike the state record above. an old
+						// prompt size is not a stale claim about a turn that has ended, it
+						// is simply the last measurement anyone took of this conversation
+						promptTokens = event.value;
+						break;
 				}
 			}
 
@@ -171,6 +198,7 @@ export async function scanTail(filePath: string, from: number, open?: OpenTurn):
 		return {
 			approving,
 			open,
+			promptTokens,
 			offset: lastNewline === -1 ? from : lastNewline + 1
 		};
 	} finally {
@@ -178,13 +206,14 @@ export async function scanTail(filePath: string, from: number, open?: OpenTurn):
 	}
 }
 
-type EventKind = 'marker' | 'terminal' | 'append' | 'result' | 'state';
+type EventKind = 'marker' | 'terminal' | 'append' | 'result' | 'state' | 'tokens';
 
 interface Event {
 	index: number;
 	length: number;
 	kind: EventKind;
-	// the byte after MODEL_STATE, which is the state digit
+	// for 'state', the digit after MODEL_STATE read as a byte; for 'tokens', the run of
+	// digits after PROMPT_TOKENS read as a number
 	value?: number;
 }
 
@@ -198,7 +227,25 @@ function events(view: Buffer): Event[] {
 	collect(view, REQUEST_APPEND, 'append', found);
 	collect(view, REQUEST_RESULT, 'result', found);
 	collect(view, MODEL_STATE, 'state', found);
+	collect(view, PROMPT_TOKENS, 'tokens', found);
 	return found.sort((a, b) => a.index - b.index);
+}
+
+// the run of digits starting at `start`, and how long it was. absent when the run reaches
+// the end of the buffer, because a number cut by a chunk boundary is a different number —
+// leaving it unclaimed lets scannedTo stay put so the overlap reads the whole record next
+// pass, exactly as the model state's missing digit does
+function digitRun(view: Buffer, start: number): { value: number; length: number } | undefined {
+	let at = start;
+	let value = 0;
+	while (at < view.length && view[at]! >= 0x30 && view[at]! <= 0x39) {
+		value = value * 10 + (view[at]! - 0x30);
+		at++;
+		if (at - start > MAX_TOKEN_DIGITS) {
+			return undefined;
+		}
+	}
+	return at > start && at < view.length ? { value, length: at - start } : undefined;
 }
 
 // latin1 holds one needle character to one byte, which is what every needle already is,
@@ -212,6 +259,11 @@ function collect(view: Buffer, needle: string, kind: EventKind, into: Event[]): 
 			// scannedTo is left alone so the overlap finds the whole thing next pass
 			if (digit < view.length) {
 				into.push({ index: at, length: needle.length + 1, kind, value: view[digit] });
+			}
+		} else if (kind === 'tokens') {
+			const run = digitRun(view, at + needle.length);
+			if (run) {
+				into.push({ index: at, length: needle.length + run.length, kind, value: run.value });
 			}
 		} else {
 			into.push({ index: at, length: needle.length, kind });
@@ -235,12 +287,18 @@ export class SessionLiveTracker {
 	private offsets = new Map<string, number>();
 	private approving = new Map<string, boolean>();
 	private open = new Map<string, OpenTurn>();
+	private tokens = new Map<string, number>();
 	private started = false;
 
-	// first pass reads the tail of each file and keeps only the turn state out of it. an
-	// approval marker down there would be a lie about a window that has gone, but a turn
-	// left open is a fact, and there is no other way to learn it when the extension host
-	// has started underneath a chat that was already running
+	// first pass reads the tail of each file and keeps the turn state and the prompt size
+	// out of it. an approval marker down there would be a lie about a window that has
+	// gone, but a turn left open is a fact, and so is the last prompt size anyone
+	// measured — neither has any other way to be learnt when the extension host has
+	// started underneath a chat that was already running
+	//
+	// the seed window is 256 kb, so a session whose newest prompt size sits further back
+	// than that starts with no reading at all. two of the eighteen on this machine do.
+	// the row shows its model without a percentage until the chat next says something
 	//
 	// the offset still lands at the end of the file, exactly where it did before any of
 	// this was read. resuming from inside the seed window instead would hand those same
@@ -253,6 +311,9 @@ export class SessionLiveTracker {
 				const scan = await scanTail(session.filePath, Math.max(0, session.fileSize - SEED_BYTES));
 				if (scan.open) {
 					this.open.set(session.sessionId, scan.open);
+				}
+				if (scan.promptTokens !== undefined) {
+					this.tokens.set(session.sessionId, scan.promptTokens);
 				}
 			} catch {
 				// unreadable at startup says nothing, and the list beats a thrown refresh
@@ -272,6 +333,7 @@ export class SessionLiveTracker {
 				this.offsets.delete(id);
 				this.approving.delete(id);
 				this.open.delete(id);
+				this.tokens.delete(id);
 			}
 		}
 
@@ -293,6 +355,11 @@ export class SessionLiveTracker {
 				} else {
 					this.open.delete(session.sessionId);
 				}
+				// a delta with no prompt size in it is silence, not a reset — most appends
+				// to a session file are response text and carry no measurement at all
+				if (scan.promptTokens !== undefined) {
+					this.tokens.set(session.sessionId, scan.promptTokens);
+				}
 			} catch {
 				// a session file that cannot be read says nothing about either question, and
 				// the list is more useful than a thrown refresh
@@ -307,5 +374,12 @@ export class SessionLiveTracker {
 	// absent means the newest turn has finished, or nothing has been seen since startup
 	openTurn(sessionId: string): OpenTurn | undefined {
 		return this.open.get(sessionId);
+	}
+
+	// the newest prompt size read off the tail. absent means this session has not written
+	// one where the tail could see it, which is the usual answer for a provider that does
+	// not report token counts at all
+	promptTokens(sessionId: string): number | undefined {
+		return this.tokens.get(sessionId);
 	}
 }

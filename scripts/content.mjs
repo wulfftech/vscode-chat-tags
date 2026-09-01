@@ -36,6 +36,12 @@ export function loadContent() {
 		generating: Boolean(entry.generating),
 		archived: Boolean(entry.archived),
 		needsAttention: Boolean(entry.unread),
+		// all three are independently absent in the wild, so the fixture leaves them out
+		// the same way: a chat with no model named, and one named with nothing measured
+		// against it, are both rows the view has to draw
+		model: entry.model,
+		contextWindow: entry.contextWindow,
+		promptTokens: entry.promptTokens,
 		lastActivityAt: NOW - Math.round((entry.ageMinutes ?? 0) * MINUTE),
 		createdAt: NOW - Math.round((entry.createdDaysAgo ?? 0) * DAY)
 	}));

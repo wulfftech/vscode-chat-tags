@@ -16,6 +16,10 @@ const js = fs.readFileSync('media/view.js', 'utf8');
 // is null in both, so it stays undefined and the css falls back the way the real webview
 // does — without these the armed button and the elevated pill both paint focus-blue here
 // and the harness quietly disagrees with the product
+//
+// errorForeground and editorWarning.foreground are here for the same reason: the model
+// chip reads its two loud states off them, and a harness that fell back to plain
+// foreground would have shown a full context looking exactly like an empty one
 const THEMES = {
 	dark: {
 		'--vscode-foreground': '#cccccc',
@@ -31,6 +35,8 @@ const THEMES = {
 		'--vscode-focusBorder': '#0078d4',
 		'--vscode-inputValidation-warningBackground': '#352A05',
 		'--vscode-inputValidation-warningBorder': '#B89500',
+		'--vscode-errorForeground': '#F48771',
+		'--vscode-editorWarning-foreground': '#CCA700',
 		page: '#181818'
 	},
 	light: {
@@ -47,6 +53,8 @@ const THEMES = {
 		'--vscode-focusBorder': '#005fb8',
 		'--vscode-inputValidation-warningBackground': '#F6F5D2',
 		'--vscode-inputValidation-warningBorder': '#B89500',
+		'--vscode-errorForeground': '#A1260D',
+		'--vscode-editorWarning-foreground': '#BF8803',
 		page: '#f8f8f8'
 	}
 };
@@ -128,9 +136,11 @@ function mount(hostId, listSettings) {
 }
 
 // dark shows the new list shape: grouped by category, archived section at the bottom.
-// light keeps the settings panel open and hides archived, so the footer count shows
-mount('host-dark', { sortBy: 'activity', groupBy: 'category', showArchived: true });
-mount('host-light', { sortBy: 'created', groupBy: 'none', showArchived: false });
+// light keeps the settings panel open and hides archived, so the footer count shows.
+// both draw the model chip — it has to survive a category wash and an archived row,
+// and this is the only place either can be looked at
+mount('host-dark', { sortBy: 'activity', groupBy: 'category', showArchived: true, showModel: true });
+mount('host-light', { sortBy: 'created', groupBy: 'none', showArchived: false, showModel: true });
 </script>
 </body>
 </html>

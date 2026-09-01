@@ -3,6 +3,7 @@
 
 import * as fs from 'fs';
 import { normalisePermissionLevel } from './permissions';
+import { readSelectedModel, SelectedModel } from './sessionModel';
 
 // after the kind:0 header every line is a patch record:
 //   {"kind":1,"k":["customTitle"],"v":"..."}  set value at path k
@@ -25,6 +26,14 @@ export interface DeltaScanResult {
 	truncated: boolean;
 	// last value the permission picker was moved to, absent if it never moved
 	permissionLevel?: string;
+	// last value the model picker was moved to, absent if it never moved. every one of
+	// the 20 such records on this machine fits inside the prefix cap — the largest is
+	// 1193 bytes against 2048 — so this one is read by parsing rather than by pattern
+	model?: SelectedModel;
+	// newest prompt size seen. only meaningful while `truncated` is false: past the byte
+	// cap the last record read is an old one rather than the current one, and a stale
+	// context reading is worse than none. the live tail scan covers the rest
+	promptTokens?: number;
 }
 
 const RECORD_HEAD = /^\{"kind":(\d+),"k":\[([^\]]*)\]/;
@@ -117,8 +126,39 @@ function consider(line: string, result: DeltaScanResult): void {
 		return;
 	}
 
+	if (kind === 1 && path.length === 2 && path[0] === 'inputState' && path[1] === 'selectedModel') {
+		// later records win, for the same reason permissionLevel's do — the picker can be
+		// moved any number of times, and only the last move says what the chat is on now
+		const model = readSelectedModel(parsedValueOf(line));
+		if (model) {
+			result.model = model;
+		}
+		return;
+	}
+
+	if (kind === 1 && path.length === 3 && path[0] === 'requests' && path[2] === 'promptTokens') {
+		const value = parsedValueOf(line);
+		// records are read in file order, so the last one to land here is the newest one
+		// written. within a turn these arrive dozens at a time as the prompt grows
+		if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+			result.promptTokens = value;
+		}
+		return;
+	}
+
 	if (kind === 2 && path.length === 1 && path[0] === 'requests') {
 		result.appendedRequests++;
+	}
+}
+
+// for the records whose value is not a string. unlike a title there is nothing to salvage
+// from a half-read one: half a number is a different number, and half an object is not an
+// object at all — so a cut record is simply not read
+function parsedValueOf(line: string): unknown {
+	try {
+		return JSON.parse(line)?.v;
+	} catch {
+		return undefined;
 	}
 }
 

@@ -56,8 +56,8 @@ const PANES = [
 		id: 'sort',
 		theme: 'light',
 		height: SHORT,
-		caption: 'Sort, group, show archived',
-		settings: { sortBy: 'created', groupBy: 'none', showArchived: false },
+		caption: 'Sort, group, and what each chat is running on',
+		settings: { sortBy: 'created', groupBy: 'none', showArchived: false, showModel: true },
 		menu: 'sort'
 	},
 	{
@@ -119,6 +119,10 @@ const THEMES = {
 		// webview does — same set the harness in build-preview.mjs carries
 		'--vscode-inputValidation-warningBackground': '#352A05',
 		'--vscode-inputValidation-warningBorder': '#B89500',
+		// the model chip's 'nearly full' state reads off errorForeground above; its
+		// 'getting high' state needs this one, because inputValidation.warningForeground
+		// is null in every stock theme and would have resolved to plain foreground
+		'--vscode-editorWarning-foreground': '#CCA700',
 		page: '#181818'
 	},
 	light: {
@@ -146,6 +150,10 @@ const THEMES = {
 		'--vscode-focusBorder': '#005fb8',
 		'--vscode-inputValidation-warningBackground': '#F6F5D2',
 		'--vscode-inputValidation-warningBorder': '#B89500',
+		// the model chip's 'nearly full' state reads off errorForeground above; its
+		// 'getting high' state needs this one, because inputValidation.warningForeground
+		// is null in every stock theme and would have resolved to plain foreground
+		'--vscode-editorWarning-foreground': '#BF8803',
 		page: '#f8f8f8'
 	}
 };

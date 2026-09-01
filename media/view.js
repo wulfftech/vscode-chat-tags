@@ -14,7 +14,7 @@
 	let state = {
 		sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0, collapsedGroups: []
 	};
-	let selectedId = null;
+	let activeId = null;
 	// last row scrolled to, so a repaint does not keep yanking the list back
 	let revealedId = null;
 	// null | 'categories' | 'settings' — one at a time, they are separate things
@@ -43,6 +43,9 @@
 		unarchive: 'M20.55 5.22l-1.39-1.68A1.51 1.51 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z',
 		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
 		chevron: 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z',
+		boxEmpty: 'M19 5v14H5V5h14m0-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z',
+		boxSome: 'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-2 10H7v-2h10v2z',
+		boxAll: 'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z',
 		grip: 'M9 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM9 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM9 17a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z'
 	};
 
@@ -93,14 +96,40 @@
 
 	// ── popovers ──────────────────────────────────────────────
 
-	// anchored under whichever button opened it, clamped to the pane so a menu opened on
-	// the right-hand edge of a narrow sidebar still lands fully on screen
-	function placePopover(popover, anchor) {
+	// where a menu wants to open. a button click puts it under the button; a right-click
+	// puts it under the pointer, which is the one thing every context menu on this desktop
+	// agrees on — the ⋯ button's box is the wrong answer for a gesture that never went
+	// near the button, and on a narrow sidebar it is always the same wrong answer
+	function anchorSpot(element) {
+		const box = element.getBoundingClientRect();
+		return { top: box.top, bottom: box.bottom, left: box.left };
+	}
+
+	// a context menu raised from the keyboard — Shift+F10, or the Menu key — arrives with
+	// no pointer behind it, and the 0,0 it carries is the corner of the pane rather than
+	// anywhere near the row. the row's own box is the honest answer there
+	function pointerSpot(event, fallback) {
+		return event.clientX > 0 || event.clientY > 0
+			? { top: event.clientY, bottom: event.clientY, left: event.clientX }
+			: anchorSpot(fallback);
+	}
+
+	// clamped to the pane so a menu opened at an edge still lands fully on screen, and
+	// flipped above the spot when there is no room below it. anchoring under a toolbar
+	// button never had to face that: right-clicking the last row of a long list does
+	function placePopover(popover, spot) {
 		document.body.appendChild(popover);
-		const box = anchor.getBoundingClientRect();
 		const width = popover.offsetWidth;
-		popover.style.top = (box.bottom + window.scrollY + 2) + 'px';
-		popover.style.left = Math.max(4, Math.min(box.left, window.innerWidth - width - 6)) + 'px';
+		const height = popover.offsetHeight;
+		const below = spot.bottom + 2;
+		const above = spot.top - height - 2;
+		// below by preference, above when the pane ran out of room down there, and pinned
+		// to the bottom when the menu is taller than both gaps
+		const top = below + height <= window.innerHeight - 4 ? below
+			: above >= 4 ? above
+				: Math.max(4, window.innerHeight - height - 4);
+		popover.style.top = (top + window.scrollY) + 'px';
+		popover.style.left = Math.max(4, Math.min(spot.left, window.innerWidth - width - 6)) + 'px';
 	}
 
 	function addAction(popover, label, run, className) {
@@ -134,7 +163,7 @@
 	}
 
 	// the row's ⋯ menu: categories, then the two things that take a session out of the list
-	function openPopover(anchor, session) {
+	function openPopover(spot, session) {
 		closePopovers();
 		const popover = el('div', 'popover');
 
@@ -175,14 +204,14 @@
 		addAction(popover, 'Delete…',
 			() => send({ type: 'deleteSession', sessionId: session.sessionId }), 'danger');
 
-		placePopover(popover, anchor);
+		placePopover(popover, spot);
 	}
 
 	// ── list menu ─────────────────────────────────────────────
 
 	// order and grouping are flipped often enough that burying them in the settings panel
 	// would be wrong, so they get their own menu rather than a row of radio buttons
-	function openListMenu(anchor) {
+	function openListMenu(spot) {
 		closePopovers();
 		const settings = state.settings;
 		const popover = el('div', 'popover');
@@ -204,8 +233,10 @@
 		popover.appendChild(el('div', 'sep'));
 		addChoice(popover, 'Show archived', settings.showArchived,
 			() => send({ type: 'setSetting', key: 'showArchived', value: !settings.showArchived }));
+		addChoice(popover, 'Show model and context', settings.showModel,
+			() => send({ type: 'setSetting', key: 'showModel', value: !settings.showModel }));
 
-		placePopover(popover, anchor);
+		placePopover(popover, spot);
 	}
 
 	// ── categories panel ──────────────────────────────────────
@@ -762,7 +793,50 @@
 		return pill;
 	}
 
+	// the model a chat is set to, and how full its context window is. only some providers
+	// write a prompt size into the session file, so the chip degrades to the bare model
+	// name rather than inventing a number, and it is absent entirely when the file never
+	// named a model — an empty chip on every row would be worse than no chip at all
+	function usageChip(session) {
+		if (!session.model) {
+			return undefined;
+		}
+		const limit = session.contextWindow;
+		const used = session.promptTokens;
+		// a prompt can be measured past the window the picker advertises — a model
+		// switched mid-chat, or a provider quoting a different ceiling than it enforces.
+		// the bar stops at full rather than running off its own track
+		const share = limit && used !== undefined ? Math.min(100, Math.round(used / limit * 100)) : undefined;
+
+		const chip = el('span', 'usage');
+		chip.appendChild(el('span', 'model-name', session.model));
+		if (share === undefined) {
+			chip.title = limit
+				? session.model + ' — a ' + limit.toLocaleString() + ' token window.'
+					+ ' This chat has not recorded how much of it the last prompt used.'
+				: session.model;
+			return chip;
+		}
+
+		const meter = el('span', 'meter');
+		const fill = el('span', 'fill');
+		fill.style.width = share + '%';
+		meter.appendChild(fill);
+		chip.appendChild(meter);
+		chip.appendChild(el('span', 'share', share + '%'));
+		// the point at which a long chat starts dropping its own history, and the point
+		// at which it is about to
+		chip.dataset.level = share >= 90 ? 'full' : share >= 75 ? 'high' : 'ok';
+		chip.title = session.model + ' — the last prompt was ' + used.toLocaleString()
+			+ ' of ' + limit.toLocaleString() + ' tokens (' + share + '%).'
+			+ ' It is the size of one prompt, not a running total.';
+		return chip;
+	}
+
 	function buildRow(session, now) {
+		// draw order is what a shift-click ranges over, and this is the one place every
+		// drawn row passes through
+		drawn.push(session.sessionId);
 		const category = state.categories.find(c => c.id === session.categoryId);
 		const wants = wantsAttention(session);
 		const row = el('li', 'row');
@@ -773,15 +847,19 @@
 		if (session.turn) { row.dataset.turn = session.turn; }
 		if (session.archived) { row.classList.add('archived'); }
 		row.setAttribute('role', 'option');
-		row.setAttribute('aria-selected', String(session.sessionId === selectedId));
+		// aria-current for the one chat the pane has opened, aria-selected for the ticked
+		// set — they are different questions and a listbox has a word for each
+		row.setAttribute('aria-current', String(session.sessionId === activeId));
+		row.setAttribute('aria-selected', String(selected.has(session.sessionId)));
+		if (selected.has(session.sessionId)) { row.dataset.selected = 'true'; }
 
 		if (category) {
 			row.dataset.category = category.id;
 			row.style.setProperty('--row-colour', category.colour);
 			row.style.setProperty('--dot-colour', category.colour);
 		}
-		if (session.sessionId === selectedId) {
-			row.classList.add('selected');
+		if (session.sessionId === activeId) {
+			row.classList.add('active');
 		}
 
 		// ── title row ─────────────────────────────────────────
@@ -854,7 +932,7 @@
 		menuButton.setAttribute('aria-label', 'Category for ' + session.title);
 		menuButton.addEventListener('click', event => {
 			event.stopPropagation();
-			openPopover(menuButton, session);
+			openPopover(anchorSpot(menuButton), session);
 		});
 		titleActions.appendChild(menuButton);
 		if (armed === session.sessionId + ':title') {
@@ -914,6 +992,13 @@
 			subtitleActions.classList.add('has-armed');
 		}
 		subtitleLine.appendChild(subtitle);
+		// on the quiet line rather than up with the title: the title line already carries
+		// every pill this view has, and a model name is long enough to take a sidebar's
+		// whole width away from them
+		const usage = state.settings.showModel ? usageChip(session) : undefined;
+		if (usage) {
+			subtitleLine.appendChild(usage);
+		}
 		subtitleLine.appendChild(subtitleActions);
 
 		row.appendChild(top);
@@ -925,17 +1010,123 @@
 			row.addEventListener('pointerdown', event => startSessionDrag(event, row));
 		}
 
-		row.addEventListener('click', () => open(session.sessionId));
+		row.addEventListener('click', event => {
+			// the two modifiers every list on this desktop already uses for the job
+			if (event.ctrlKey || event.metaKey) { toggleSelected(session.sessionId); return; }
+			if (event.shiftKey) { selectRange(session.sessionId); return; }
+			// and a plain click means "open this one", which also means "not that set"
+			const had = clearSelection();
+			open(session.sessionId);
+			if (had) { render(); }
+		});
 		row.addEventListener('contextmenu', event => {
 			event.preventDefault();
-			openPopover(menuButton, session);
+			openPopover(pointerSpot(event, row), session);
 		});
 		return row;
 	}
 
 	function open(sessionId) {
-		selectedId = sessionId;
+		activeId = sessionId;
 		send({ type: 'open', sessionId });
+	}
+
+	// ── selecting a set of chats ──────────────────────────────
+
+	// the chats ticked for a bulk action. deliberately not the same thing as activeId,
+	// which is the one chat the pane has opened — a set gets acted on without any of it
+	// being opened, and the two need different words or they end up meaning each other
+	let selected = new Set();
+	// where a shift-click measures its range from
+	let anchorId = null;
+	// every row drawn, in draw order, so a shift-click knows what lies between two of them
+	let drawn = [];
+
+	function clearSelection() {
+		if (!selected.size) { return false; }
+		selected = new Set();
+		anchorId = null;
+		return true;
+	}
+
+	function toggleSelected(sessionId) {
+		if (selected.has(sessionId)) { selected.delete(sessionId); } else { selected.add(sessionId); }
+		anchorId = sessionId;
+		render();
+	}
+
+	// everything drawn between the anchor and here, inclusive. a collapsed group has no
+	// rows in the list, so none of its chats are in the range either — which is the right
+	// answer for a gesture that means "these ones, the ones I can see"
+	function selectRange(sessionId) {
+		const to = drawn.indexOf(sessionId);
+		const from = anchorId === null ? to : drawn.indexOf(anchorId);
+		if (to === -1 || from === -1) {
+			toggleSelected(sessionId);
+			return;
+		}
+		for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
+			selected.add(drawn[i]);
+		}
+		render();
+	}
+
+	// how much of a group is ticked, which is what its heading's box has to draw
+	function coverage(sessionIds) {
+		const hits = sessionIds.filter(id => selected.has(id)).length;
+		return hits === 0 ? 'none' : hits === sessionIds.length ? 'all' : 'some';
+	}
+
+	function toggleGroupSelection(sessionIds) {
+		const whole = coverage(sessionIds) === 'all';
+		for (const id of sessionIds) {
+			if (whole) { selected.delete(id); } else { selected.add(id); }
+		}
+		anchorId = whole ? null : sessionIds[sessionIds.length - 1];
+		render();
+	}
+
+	// while anything is ticked this stands where the toolbar stands, rather than under it.
+	// the actions here are the only ones that mean anything mid-selection, and taking the
+	// same sticky slot means the count and the button cannot be scrolled away from
+	function buildSelectionBar() {
+		const bar = el('div', 'toolbar selecting');
+		bar.appendChild(el('span', 'count', selected.size + ' selected'));
+		bar.appendChild(el('div', 'spacer'));
+
+		const chosen = state.sessions.filter(session => selected.has(session.sessionId));
+		const loose = chosen.filter(session => !session.archived).map(session => session.sessionId);
+		const away = chosen.filter(session => session.archived).map(session => session.sessionId);
+
+		// each button says how many it will move, and is absent when it would move none.
+		// a mixed selection gets both, because it genuinely has both to offer
+		if (loose.length) {
+			bar.appendChild(bulkButton('Archive', loose, true));
+		}
+		if (away.length) {
+			bar.appendChild(bulkButton('Restore', away, false));
+		}
+
+		const clear = el('button', null, 'Clear');
+		clear.title = 'Clear the selection (Escape)';
+		clear.addEventListener('click', () => { clearSelection(); render(); });
+		bar.appendChild(clear);
+		return bar;
+	}
+
+	function bulkButton(label, sessionIds, archived) {
+		const button = el('button', 'bulk', label + ' ' + sessionIds.length);
+		button.title = label + ' ' + sessionIds.length + (sessionIds.length === 1 ? ' chat' : ' chats')
+			+ '. Archiving is reversible — nothing is deleted.';
+		button.addEventListener('click', () => {
+			// with archived rows hidden these are about to leave the list, and a selection
+			// pointing at rows that are gone is not one. repaint now rather than waiting for
+			// the round trip, or the bar sits there counting chats that have moved
+			clearSelection();
+			render();
+			send({ type: 'setArchivedMany', sessionIds: sessionIds, archived: archived });
+		});
+		return button;
 	}
 
 	// ── dragging a chat into another group ────────────────────
@@ -1027,6 +1218,11 @@
 		let committing = true;
 		let frame = 0;
 
+		// what this drag is carrying: the ticked set if this row is one of them, else itself
+		const dragged = () => selected.has(row.dataset.sessionId) && selected.size > 1
+			? [...selected]
+			: [row.dataset.sessionId];
+
 		const paint = () => {
 			group = groupUnder(list, y);
 			paintDropGroup(list, row, group);
@@ -1042,8 +1238,17 @@
 				dragging = true;
 				draggingSessionId = row.dataset.sessionId;
 				row.classList.add('dragging');
+				// picking up one of a ticked set picks up the set. leaving the other rows
+				// behind would be the surprising reading of the gesture
+				const carrying = dragged();
 				const titled = row.querySelector('.title');
-				chip = dragChip(titled ? titled.textContent : '', x, y);
+				chip = dragChip(carrying.length > 1
+					? carrying.length + ' chats'
+					: (titled ? titled.textContent : ''), x, y);
+				for (const id of carrying) {
+					const other = list.querySelector('.row[data-session-id="' + id + '"]');
+					if (other) { other.classList.add('dragging'); }
+				}
 				try {
 					row.setPointerCapture(moved.pointerId);
 				} catch (error) {
@@ -1080,8 +1285,10 @@
 			const landed = committing && canDropInto(row, group);
 			const into = group ? group.dataset.groupId : null;
 			if (chip) { chip.remove(); }
-			row.classList.remove('dragging');
-			for (const node of list.children) { delete node.dataset.dropInto; }
+			for (const node of list.children) {
+				delete node.dataset.dropInto;
+				node.classList.remove('dragging');
+			}
 			draggingSessionId = null;
 
 			// letting go of a chat is not clicking it, but the browser sends a click either
@@ -1092,11 +1299,11 @@
 			setTimeout(() => document.removeEventListener('click', swallow, true), 0);
 
 			if (landed) {
-				send({
-					type: 'setCategory',
-					sessionId: row.dataset.sessionId,
-					categoryId: into === 'uncategorised' ? null : into
-				});
+				const moving = dragged();
+				const categoryId = into === 'uncategorised' ? null : into;
+				send(moving.length > 1
+					? { type: 'setCategoryMany', sessionIds: moving, categoryId: categoryId }
+					: { type: 'setCategory', sessionId: moving[0], categoryId: categoryId });
 			} else {
 				// nothing changed, so nothing is coming back to repaint this — and a repaint
 				// may have been held off while the pointer was down
@@ -1159,8 +1366,9 @@
 	// works the same way in either place instead of two idioms doing the same thing
 	function appendGroupSection(list, id, label, colour, sessions, now) {
 		const collapsed = isGroupCollapsed(id);
-		const containsSelected = sessions.some(session => session.sessionId === selectedId);
-		list.appendChild(sectionHeader(label, sessions.length, colour, id, collapsed, containsSelected));
+		const containsActive = sessions.some(session => session.sessionId === activeId);
+		list.appendChild(sectionHeader(label, sessions.map(session => session.sessionId),
+			colour, id, collapsed, containsActive));
 		if (collapsed) { return; }
 		for (const session of sessions) {
 			list.appendChild(buildRow(session, now));
@@ -1169,7 +1377,7 @@
 
 	// the whole heading toggles, not just a chevron button — a bigger target beats a
 	// precise one for something clicked this often
-	function sectionHeader(label, count, colour, groupId, collapsed, containsSelected) {
+	function sectionHeader(label, sessionIds, colour, groupId, collapsed, containsActive) {
 		const header = el('li', 'group');
 		header.setAttribute('role', 'button');
 		header.tabIndex = 0;
@@ -1185,11 +1393,29 @@
 		if (colour) { swatch.style.setProperty('--swatch', colour); }
 		header.appendChild(swatch);
 		header.appendChild(el('span', 'group-name', label));
-		header.appendChild(el('span', 'group-count', String(count)));
+		header.appendChild(el('span', 'group-count', String(sessionIds.length)));
+
+		// selecting a whole group is the point of this control, so it reads the group's
+		// chats rather than its rows — a collapsed group has none of the latter and its
+		// heading still ticks every one of the former
+		const cover = coverage(sessionIds);
+		const pick = el('button', 'pick');
+		pick.dataset.coverage = cover;
+		pick.appendChild(icon(cover === 'all' ? 'boxAll' : cover === 'some' ? 'boxSome' : 'boxEmpty', 14));
+		pick.title = (cover === 'all' ? 'Deselect these ' : 'Select these ') + sessionIds.length;
+		pick.setAttribute('aria-label', pick.title + ' in ' + label);
+		pick.setAttribute('aria-checked', cover === 'all' ? 'true' : cover === 'some' ? 'mixed' : 'false');
+		pick.setAttribute('role', 'checkbox');
+		pick.addEventListener('click', event => {
+			// the whole heading toggles the fold, so this has to keep its click to itself
+			event.stopPropagation();
+			toggleGroupSelection(sessionIds);
+		});
+		header.appendChild(pick);
 		const toggle = () => {
 			// about to bring the selected row back into the dom — let the reveal check
 			// below fire again once it's there, or it stays scrolled wherever it landed
-			if (collapsed && containsSelected) { revealedId = null; }
+			if (collapsed && containsActive) { revealedId = null; }
 			send({ type: 'toggleGroupCollapsed', groupId });
 		};
 		header.addEventListener('click', toggle);
@@ -1203,27 +1429,7 @@
 		return header;
 	}
 
-	function render() {
-		const now = Date.now();
-		closePopovers();
-		// whatever had focus is about to be torn out from under itself. two things here can
-		// survive that: a group heading, and — one panel over, where a keyboard move repaints
-		// the list the handle lives in — a reorder grip. without the second, the next ↓ in a
-		// run of them has nothing focused left to act on
-		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		const focusedGroupId = focused && focused.classList.contains('group')
-			? focused.dataset.groupId
-			: null;
-		const focusedGripId = focused && focused.classList.contains('grip')
-			? focused.dataset.categoryId
-			: null;
-		root.textContent = '';
-
-		const live = state.sessions.filter(session => !session.archived);
-		const archived = state.sessions.filter(session => session.archived);
-		// archived rows are out of sight by definition, so they don't get to ask for you
-		const unread = live.filter(wantsAttention).length;
-
+	function buildToolbar(live, unread) {
 		const toolbar = el('div', 'toolbar');
 		const categories = el('button', openPanel === 'categories' ? 'active' : null, 'Categories');
 		categories.title = openPanel === 'categories' ? 'Close categories' : 'Categories';
@@ -1254,7 +1460,7 @@
 		sort.setAttribute('aria-label', 'Sort, group and archived');
 		sort.addEventListener('click', event => {
 			event.stopPropagation();
-			openListMenu(sort);
+			openListMenu(anchorSpot(sort));
 		});
 		toolbar.appendChild(sort);
 
@@ -1277,7 +1483,39 @@
 		extensions.addEventListener('click', () => send({ type: 'openInExtensions' }));
 		toolbar.appendChild(extensions);
 
-		root.appendChild(toolbar);
+		return toolbar;
+	}
+
+	function render() {
+		const now = Date.now();
+		closePopovers();
+		// whatever had focus is about to be torn out from under itself. two things here can
+		// survive that: a group heading, and — one panel over, where a keyboard move repaints
+		// the list the handle lives in — a reorder grip. without the second, the next ↓ in a
+		// run of them has nothing focused left to act on
+		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const focusedGroupId = focused && focused.classList.contains('group')
+			? focused.dataset.groupId
+			: null;
+		const focusedGripId = focused && focused.classList.contains('grip')
+			? focused.dataset.categoryId
+			: null;
+		root.textContent = '';
+		drawn = [];
+
+		// a selection pointing at chats that are no longer in the list is not a selection.
+		// archiving with the archived block hidden takes them straight out from under it
+		const present = new Set(state.sessions.map(session => session.sessionId));
+		for (const id of [...selected]) {
+			if (!present.has(id)) { selected.delete(id); }
+		}
+
+		const live = state.sessions.filter(session => !session.archived);
+		const archived = state.sessions.filter(session => session.archived);
+		// archived rows are out of sight by definition, so they don't get to ask for you
+		const unread = live.filter(wantsAttention).length;
+
+		root.appendChild(selected.size ? buildSelectionBar() : buildToolbar(live, unread));
 
 		if (openPanel === 'categories') {
 			const panel = buildCategoriesPanel();
@@ -1297,6 +1535,7 @@
 		const list = el('ul', 'list');
 		list.setAttribute('role', 'listbox');
 		list.setAttribute('aria-label', 'Chat sessions');
+		list.setAttribute('aria-multiselectable', 'true');
 
 		// collapsed rows are left out of the DOM entirely rather than hidden with css —
 		// this view already does a full teardown/rebuild every render, so there's no
@@ -1326,9 +1565,9 @@
 		}
 
 		// a selection you cannot see is not a selection, and an adopted row can be anywhere
-		if (selectedId && selectedId !== revealedId) {
-			revealedId = selectedId;
-			const chosen = list.querySelector('.row.selected');
+		if (activeId && activeId !== revealedId) {
+			revealedId = activeId;
+			const chosen = list.querySelector('.row.active');
 			if (chosen && chosen.scrollIntoView) {
 				chosen.scrollIntoView({ block: 'nearest' });
 			}
@@ -1348,7 +1587,11 @@
 	document.addEventListener('click', closePopovers);
 
 	document.addEventListener('keydown', event => {
-		if (event.key === 'Escape') { closePopovers(); return; }
+		if (event.key === 'Escape') {
+			closePopovers();
+			if (clearSelection()) { render(); }
+			return;
+		}
 		if (editingSubtitleFor) { return; }
 		if (event.key === 'ArrowDown') { event.preventDefault(); focusOffset(1); }
 		else if (event.key === 'ArrowUp') { event.preventDefault(); focusOffset(-1); }
@@ -1356,7 +1599,9 @@
 			const active = document.activeElement;
 			if (active instanceof HTMLElement && active.dataset.sessionId) {
 				event.preventDefault();
-				open(active.dataset.sessionId);
+				// the keyboard's version of a ctrl-click, so a set can be built without a mouse
+				if (event.ctrlKey || event.metaKey) { toggleSelected(active.dataset.sessionId); }
+				else { open(active.dataset.sessionId); }
 			}
 		}
 	});
@@ -1372,7 +1617,7 @@
 			// the provider owns the selection once anything has been opened, so a row adopted
 			// after a new chat lands shows up without the user clicking it
 			if (message.activeSessionId !== undefined) {
-				selectedId = message.activeSessionId;
+				activeId = message.activeSessionId;
 			}
 			state = {
 				sessions: message.sessions,

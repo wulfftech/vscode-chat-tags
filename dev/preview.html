@@ -126,7 +126,7 @@ button {
 	font-weight: 600;
 }
 
-.row.selected {
+.row.active {
 	background: var(--vscode-list-activeSelectionBackground);
 	color: var(--vscode-list-activeSelectionForeground);
 }
@@ -259,6 +259,80 @@ button {
 	white-space: nowrap;
 	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
+}
+
+/* the model a chat is set to, and how full its window is. it takes the end of the
+   subtitle line, and the two of them are in a fight for a sidebar's worth of width.
+   the chip wins it: shrink 0 against the subtitle's 1, so the subtitle gives ground
+   first. letting them shrink together looked right and wasn't — at 340px the name was
+   ellipsized away to nothing and the chip drew a bar with no idea what it measured */
+.usage {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	/* the ceiling on that win. below about 200px there is no arrangement that fits both,
+	   and half a subtitle beats a whole model name */
+	max-width: 55%;
+	min-width: 0;
+	font-size: 10px;
+	line-height: 1;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* the only part of the chip that gives — the meter and the number below are both
+   flex: 0 0 auto, so what gets cut is always the name and never the reading */
+.usage .model-name {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 10em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* a bar answers 'how full' before a number does, which is the only question this is
+   here to answer at a glance. the number stays for the times it isn't */
+.usage .meter {
+	flex: 0 0 auto;
+	width: 22px;
+	height: 3px;
+	border-radius: 2px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--vscode-descriptionForeground) 30%, transparent);
+}
+
+.usage .fill {
+	display: block;
+	height: 100%;
+	background: currentColor;
+}
+
+/* tabular figures so the percentage does not jitter sideways as it climbs — this is the
+   one number in the view that changes while you are looking at it */
+.usage .share {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+/* the editor's own warning colour, then the red the delete action already owns. a context
+   about to start dropping its own history is the one reading here worth alarming about.
+
+   deliberately not inputValidation.warningForeground, which is what the elevated pill
+   asks for: that token is null in all four stock themes, so as a text colour it resolves
+   to plain foreground and the 'high' state would have been invisible. the pill gets away
+   with it because its amber comes from warningBackground and warningBorder instead */
+.usage[data-level="high"] {
+	color: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
+}
+
+.usage[data-level="full"] {
+	color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+/* an archived row is put away, like its pills */
+.row.archived .usage {
+	opacity: 0.5;
 }
 
 /* the subtitle text is no longer a click target — editing needs the pencil, so
@@ -525,6 +599,93 @@ button {
 	flex: 1 1 auto;
 	min-width: 0;
 	accent-color: var(--vscode-focusBorder);
+}
+
+/* ── selecting a set of chats ────────────────────────────────────────────── */
+
+/* an overlay again, for the same reason the drop tint is one: the row underneath is
+   already carrying a category wash, a hover or the opened-row background, and a ticked
+   row has to read the same over all of them. ::before here, ::after is the drop target's
+   —
+   the theme's own selection colour, mixed rather than laid on flat. list.inactiveSelection-
+   Background is opaque in every stock theme, so using it as written would paint the
+   category wash out of the row entirely */
+.row[data-selected="true"]::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: color-mix(in srgb,
+		var(--vscode-list-activeSelectionBackground, var(--vscode-focusBorder)) 55%, transparent);
+}
+
+/* and the dot goes square. shape rather than size, so the title beside it does not shift
+   sideways as rows go in and out of the set — a tint alone is too easy to lose against a
+   row that is already washed with its category colour */
+.row[data-selected="true"] .dot {
+	border-radius: 2px;
+	background: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+	box-shadow: none;
+	animation: none;
+	opacity: 1;
+}
+
+/* the bar stands where the toolbar stands rather than under it, so it inherits the
+   sticky slot and cannot be scrolled away from */
+.toolbar.selecting {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 14%, var(--vscode-sideBar-background, transparent));
+	border-bottom-color: var(--vscode-focusBorder);
+}
+
+.toolbar.selecting .count {
+	color: var(--vscode-foreground);
+	font-weight: 600;
+}
+
+.toolbar.selecting .bulk {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	opacity: 1;
+}
+
+.toolbar.selecting .bulk:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* the group's tick keeps out of the way until there is a reason for it: hovering the
+   heading, or a selection already under way somewhere in the list */
+.group .pick {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	padding: 0 1px;
+	margin-left: 2px;
+	opacity: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.group:hover .pick,
+.group:focus-within .pick,
+.group .pick[data-coverage="some"],
+.group .pick[data-coverage="all"] {
+	opacity: 0.75;
+}
+
+.group .pick[data-coverage="some"],
+.group .pick[data-coverage="all"] {
+	color: var(--vscode-focusBorder);
+}
+
+.group .pick:hover,
+.group .pick:focus-visible {
+	opacity: 1;
+	color: var(--vscode-foreground);
+}
+
+.group .pick:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+	border-radius: 2px;
 }
 
 /* ── dragging a chat into another group ──────────────────────────────────── */
@@ -982,8 +1143,8 @@ button {
 body { margin: 0; font-family: -apple-system, "Segoe UI", sans-serif; background: #0d0d0d; }
 .panes { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
 .pane { width: 340px; border-radius: 6px; overflow: hidden; }
-.pane.dark { --vscode-foreground:#cccccc;--vscode-descriptionForeground:#9d9d9d;--vscode-sideBar-background:#181818;--vscode-sideBarSectionHeader-border:#2b2b2b;--vscode-list-hoverBackground:#2a2d2e;--vscode-list-activeSelectionBackground:#04395e;--vscode-list-activeSelectionForeground:#ffffff;--vscode-button-secondaryBackground:#313131;--vscode-button-secondaryForeground:#cccccc;--vscode-button-secondaryHoverBackground:#3c3c3c;--vscode-focusBorder:#0078d4;--vscode-inputValidation-warningBackground:#352A05;--vscode-inputValidation-warningBorder:#B89500; background: #181818; color: #cccccc; }
-.pane.light { --vscode-foreground:#3b3b3b;--vscode-descriptionForeground:#767676;--vscode-sideBar-background:#f8f8f8;--vscode-sideBarSectionHeader-border:#e5e5e5;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#0060c0;--vscode-list-activeSelectionForeground:#ffffff;--vscode-button-secondaryBackground:#e5e5e5;--vscode-button-secondaryForeground:#3b3b3b;--vscode-button-secondaryHoverBackground:#dcdcdc;--vscode-focusBorder:#005fb8;--vscode-inputValidation-warningBackground:#F6F5D2;--vscode-inputValidation-warningBorder:#B89500; background: #f8f8f8; color: #3b3b3b; }
+.pane.dark { --vscode-foreground:#cccccc;--vscode-descriptionForeground:#9d9d9d;--vscode-sideBar-background:#181818;--vscode-sideBarSectionHeader-border:#2b2b2b;--vscode-list-hoverBackground:#2a2d2e;--vscode-list-activeSelectionBackground:#04395e;--vscode-list-activeSelectionForeground:#ffffff;--vscode-button-secondaryBackground:#313131;--vscode-button-secondaryForeground:#cccccc;--vscode-button-secondaryHoverBackground:#3c3c3c;--vscode-focusBorder:#0078d4;--vscode-inputValidation-warningBackground:#352A05;--vscode-inputValidation-warningBorder:#B89500;--vscode-errorForeground:#F48771;--vscode-editorWarning-foreground:#CCA700; background: #181818; color: #cccccc; }
+.pane.light { --vscode-foreground:#3b3b3b;--vscode-descriptionForeground:#767676;--vscode-sideBar-background:#f8f8f8;--vscode-sideBarSectionHeader-border:#e5e5e5;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#0060c0;--vscode-list-activeSelectionForeground:#ffffff;--vscode-button-secondaryBackground:#e5e5e5;--vscode-button-secondaryForeground:#3b3b3b;--vscode-button-secondaryHoverBackground:#dcdcdc;--vscode-focusBorder:#005fb8;--vscode-inputValidation-warningBackground:#F6F5D2;--vscode-inputValidation-warningBorder:#B89500;--vscode-errorForeground:#A1260D;--vscode-editorWarning-foreground:#BF8803; background: #f8f8f8; color: #3b3b3b; }
 .pane { --vscode-font-family: -apple-system, "Segoe UI", sans-serif; --vscode-font-size: 13px; }
 .harness-label { font-size: 11px; opacity: 0.5; padding: 6px 10px 2px; }
 </style>
@@ -1003,7 +1164,7 @@ body { margin: 0; font-family: -apple-system, "Segoe UI", sans-serif; background
 const NOW = 1787000000000;
 const CATEGORIES = [{"id":"c1","name":"Review Needed","colour":"#e08c3f"},{"id":"c2","name":"Important","colour":"#3794ff"},{"id":"c3","name":"Waiting","colour":"#db2929"},{"id":"c4","name":"Stonks","colour":"#29b8db"}];
 const MODELS = [{"id":"gpt-4o-mini","name":"GPT-4o mini","family":"gpt-4o-mini","vendor":"copilot"},{"id":"stealth/ox-alpha","name":"Ox Alpha","family":"ox","vendor":"openrouter"},{"id":"claude-haiku-4-5","name":"Claude Haiku 4.5","family":"haiku","vendor":"openrouter"}];
-const SESSIONS = [{"sessionId":"g1","title":"Incident Response Escalation Path","subtitle":"Have you tried turning it off and on again?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":4,"activity":"active","turn":"waiting","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999988000,"createdAt":1786999136000},{"sessionId":"g2","title":"Rocket Ship 27 — refuckulation attempt","subtitle":"For fuck's sake Ricky, use real space words!","subtitleSource":"llm","titleOverridden":true,"titleSource":"llm","categoryId":"c2","requestCount":15,"activity":"recent","turn":"working","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999910000,"createdAt":1785099200000},{"sessionId":"g3","title":"Beverage Inventory Reconciliation","titleOverridden":false,"categoryId":"c4","requestCount":2,"activity":"recent","autoApproving":false,"generating":true,"archived":false,"needsAttention":false,"lastActivityAt":1786999604000,"createdAt":1786740800000},{"sessionId":"g4","title":"Residential Asset Valuation Report","subtitle":"Tell him he's dreamin'","subtitleSource":"manual","titleOverridden":true,"titleSource":"manual","categoryId":"c1","requestCount":9,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786997600000,"createdAt":1781816000000},{"sessionId":"g5","title":"Dining Experience Satisfaction Survey","subtitle":"What is the charge? Eating a meal?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":23,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786992800000,"createdAt":1786913600000},{"sessionId":"g6","title":"Risk Register — Worst Case","subtitle":"Worst-case Ontario","subtitleSource":"manual","titleOverridden":false,"requestCount":6,"activity":"idle","permissionLevel":"autopilot","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786982000000,"createdAt":1783112000000},{"sessionId":"g7","title":"Personal Safety Self-Assessment","titleOverridden":false,"requestCount":1,"activity":"idle","autoApproving":true,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786910000000,"createdAt":1785790400000},{"sessionId":"g8","title":"Wedding Logistics Retrospective","subtitle":"You're terrible, Muriel","subtitleSource":"manual","titleOverridden":false,"categoryId":"c1","requestCount":17,"activity":"idle","autoApproving":false,"generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786700000000,"createdAt":1774040000000},{"sessionId":"g9","title":"Disciplinary Procedure Handbook","subtitle":"That's a paddlin'","subtitleSource":"manual","titleOverridden":false,"requestCount":4,"activity":"idle","autoApproving":false,"generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786640000000,"createdAt":1769720000000},{"sessionId":"t1","title":"Emergency Contact Directory","subtitle":"0118 999 881 999 119 725 3","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":3,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999982000,"createdAt":1786998272000},{"sessionId":"t2","title":"Workplace Amenity Review","subtitle":"How's the serenity?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":7,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999280000,"createdAt":1786568000000},{"sessionId":"t3","title":"Meteorological Complaint Log","subtitle":"Old man yells at cloud","subtitleSource":"manual","titleOverridden":false,"requestCount":5,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786988000000,"createdAt":1779224000000},{"sessionId":"t4","title":"Edged Tool Classification","subtitle":"That's not a knife","subtitleSource":"manual","titleOverridden":false,"categoryId":"c2","requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786946000000,"createdAt":1776632000000},{"sessionId":"k1","title":"Cafeteria Menu Standardisation","subtitle":"Steamed hams, an Albany expression","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":8,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999976000,"createdAt":1786997408000},{"sessionId":"k2","title":"Hardware Compatibility Statement","subtitle":"Bite my shiny metal arse","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":11,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999820000,"createdAt":1786395200000},{"sessionId":"k3","title":"Procurement Chain of Custody","subtitle":"Supply and command","subtitleSource":"manual","titleOverridden":false,"categoryId":"c4","requestCount":6,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786998500000,"createdAt":1785444800000},{"sessionId":"k4","title":"English Proficiency Test Results","subtitle":"Me fail English? That's unpossible","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":14,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786989200000,"createdAt":1784148800000},{"sessionId":"k5","title":"Excavation Permit Application","subtitle":"Dad, I dug a hole","subtitleSource":"manual","titleOverridden":false,"requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786952000000,"createdAt":1781470400000},{"sessionId":"k6","title":"Neighbour Relations Working Group","subtitle":"Stupid sexy Flanders","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":9,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786856000000,"createdAt":1777496000000},{"sessionId":"o1","title":"Quarterly All-Hands Announcement","subtitle":"Good news, everyone!","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":5,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999970000,"createdAt":1783544000000},{"sessionId":"o2","title":"Stakeholder Sentiment Analysis","subtitle":"It's the vibe of the thing","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":12,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999520000,"createdAt":1786982720000},{"sessionId":"o3","title":"Root Cause Analysis Findings","subtitle":"Denial and error","subtitleSource":"manual","titleOverridden":false,"categoryId":"c4","requestCount":4,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786996400000,"createdAt":1785963200000},{"sessionId":"o4","title":"Asset Relocation Final Approval","subtitle":"Straight to the pool room","subtitleSource":"manual","titleOverridden":false,"requestCount":3,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786985600000,"createdAt":1786827200000},{"sessionId":"o5","title":"Debate Resolution Summary","subtitle":"It's a mute point","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":7,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786940000000,"createdAt":1780520000000},{"sessionId":"o6","title":"Personal Grooming Policy Update","subtitle":"Get a fuckin' haircut","subtitleSource":"manual","titleOverridden":false,"categoryId":"c2","requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786868000000,"createdAt":1786222400000},{"sessionId":"o7","title":"Dairy Consumption Objectives","subtitle":"Here to drink milk and kick arse","subtitleSource":"llm","titleOverridden":false,"requestCount":6,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786760000000,"createdAt":1784753600000},{"sessionId":"m1","title":"Feline Welfare Housing Assessment","subtitle":"Frig off, the kitties are fine","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":9,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999964000,"createdAt":1786996544000},{"sessionId":"m2","title":"Competitive Strategy Alternatives","subtitle":"I'll build my own, with blackjack","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":13,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999700000,"createdAt":1785617600000},{"sessionId":"m3","title":"Overtime Authorisation Request","subtitle":"This is the worst kind of discrimination","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":4,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786998200000,"createdAt":1785185600000},{"sessionId":"m4","title":"Vendor Dispute Mediation Log","subtitle":"What are you, some kind of dick?","subtitleSource":"manual","titleOverridden":false,"categoryId":"c3","requestCount":6,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786984400000,"createdAt":1782248000000},{"sessionId":"m5","title":"Interior Design Review Panel","subtitle":"It's noice, different, unusual","subtitleSource":"manual","titleOverridden":false,"requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786928000000,"createdAt":1779396800000},{"sessionId":"m6","title":"Ancient Pizza Restaurant Rediscovery Programme","subtitle":"Archaeological evidence suggests anchovies remain unpopular","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":12,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786820000000,"createdAt":1775768000000},{"sessionId":"b1","title":"Knowledge Management and Learning","subtitle":"It's all water under the fridge","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":10,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999958000,"createdAt":1786995680000},{"sessionId":"b2","title":"Software Patch Rollback Procedure","subtitle":"Everything's coming up Milhouse","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":5,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999760000,"createdAt":1786049600000},{"sessionId":"b3","title":"Military Sphere Threat Evaluation","subtitle":"The killbots have reached their limit","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":8,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786998680000,"createdAt":1784494400000},{"sessionId":"b4","title":"Select a name for a new project","subtitle":"Why would it be between that or Muhammad?","subtitleSource":"manual","titleOverridden":true,"titleSource":"manual","categoryId":"c4","requestCount":3,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786991000000,"createdAt":1786481600000},{"sessionId":"b5","title":"Emergency Communication Protocol","subtitle":"Dear Sir/Madam, I am writing to inform you of a fire","subtitleSource":"llm","titleOverridden":false,"requestCount":7,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786916000000,"createdAt":1782939200000},{"sessionId":"k7","title":"Facilities Access Request Form","subtitle":"Frig off, I'm makin' cheeseburgers","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":10,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786760000000,"createdAt":1774904000000},{"sessionId":"k8","title":"Refreshment Procurement Schedule","subtitle":"Rum and Coke, boys","subtitleSource":"manual","titleOverridden":false,"requestCount":13,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786640000000,"createdAt":1773176000000},{"sessionId":"k9","title":"Automated Systems Failure Report","subtitle":"Sweet zombie Jesus","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":16,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786460000000,"createdAt":1771880000000},{"sessionId":"m7","title":"Employee Conduct Review Meeting","subtitle":"Shit apple doesn't fall far from the tree","subtitleSource":"manual","titleOverridden":false,"categoryId":"c1","requestCount":7,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786700000000,"createdAt":1774472000000},{"sessionId":"m8","title":"Noise Abatement Complaint","subtitle":"Frig off, Randy","subtitleSource":"llm","titleOverridden":false,"requestCount":10,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786520000000,"createdAt":1770584000000},{"sessionId":"b6","title":"Legal Representation Options","subtitle":"It's the Constitution, it's Mabo","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":6,"activity":"idle","permissionLevel":"assisted","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786844000000,"createdAt":1782507200000},{"sessionId":"b7","title":"Public Transport Feasibility Study","subtitle":"Monorail!","subtitleSource":"manual","titleOverridden":false,"requestCount":9,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786748000000,"createdAt":1780952000000},{"sessionId":"b8","title":"Sanitation Department Proposal","subtitle":"Can't someone else do it?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":12,"activity":"idle","permissionLevel":"autoApprove","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786520000000,"createdAt":1771016000000},{"sessionId":"o8","title":"Nutritional Guidelines Update","subtitle":"You don't win friends with salad","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":5,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786640000000,"createdAt":1778532800000}];
+const SESSIONS = [{"sessionId":"g1","title":"Incident Response Escalation Path","subtitle":"Have you tried turning it off and on again?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":4,"activity":"active","turn":"waiting","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999988000,"createdAt":1786999136000},{"sessionId":"g2","title":"Rocket Ship 27 — refuckulation attempt","subtitle":"For fuck's sake Ricky, use real space words!","subtitleSource":"llm","titleOverridden":true,"titleSource":"llm","categoryId":"c2","requestCount":15,"activity":"recent","turn":"working","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999910000,"createdAt":1785099200000},{"sessionId":"g3","title":"Beverage Inventory Reconciliation","titleOverridden":false,"categoryId":"c4","requestCount":2,"activity":"recent","autoApproving":false,"generating":true,"archived":false,"needsAttention":false,"lastActivityAt":1786999604000,"createdAt":1786740800000},{"sessionId":"g4","title":"Residential Asset Valuation Report","subtitle":"Tell him he's dreamin'","subtitleSource":"manual","titleOverridden":true,"titleSource":"manual","categoryId":"c1","requestCount":9,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786997600000,"createdAt":1781816000000},{"sessionId":"g5","title":"Dining Experience Satisfaction Survey","subtitle":"What is the charge? Eating a meal?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":23,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786992800000,"createdAt":1786913600000},{"sessionId":"g6","title":"Risk Register — Worst Case","subtitle":"Worst-case Ontario","subtitleSource":"manual","titleOverridden":false,"requestCount":6,"activity":"idle","permissionLevel":"autopilot","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786982000000,"createdAt":1783112000000},{"sessionId":"g7","title":"Personal Safety Self-Assessment","titleOverridden":false,"requestCount":1,"activity":"idle","autoApproving":true,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786910000000,"createdAt":1785790400000},{"sessionId":"g8","title":"Wedding Logistics Retrospective","subtitle":"You're terrible, Muriel","subtitleSource":"manual","titleOverridden":false,"categoryId":"c1","requestCount":17,"activity":"idle","autoApproving":false,"generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786700000000,"createdAt":1774040000000},{"sessionId":"g9","title":"Disciplinary Procedure Handbook","subtitle":"That's a paddlin'","subtitleSource":"manual","titleOverridden":false,"requestCount":4,"activity":"idle","autoApproving":false,"generating":false,"archived":true,"needsAttention":false,"lastActivityAt":1786640000000,"createdAt":1769720000000},{"sessionId":"t1","title":"Emergency Contact Directory","subtitle":"0118 999 881 999 119 725 3","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":3,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999982000,"createdAt":1786998272000},{"sessionId":"t2","title":"Workplace Amenity Review","subtitle":"How's the serenity?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":7,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999280000,"createdAt":1786568000000},{"sessionId":"t3","title":"Meteorological Complaint Log","subtitle":"Old man yells at cloud","subtitleSource":"manual","titleOverridden":false,"requestCount":5,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786988000000,"createdAt":1779224000000},{"sessionId":"t4","title":"Edged Tool Classification","subtitle":"That's not a knife","subtitleSource":"manual","titleOverridden":false,"categoryId":"c2","requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786946000000,"createdAt":1776632000000},{"sessionId":"k1","title":"Cafeteria Menu Standardisation","subtitle":"Steamed hams, an Albany expression","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":8,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999976000,"createdAt":1786997408000},{"sessionId":"k2","title":"Hardware Compatibility Statement","subtitle":"Bite my shiny metal arse","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":11,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999820000,"createdAt":1786395200000},{"sessionId":"k3","title":"Procurement Chain of Custody","subtitle":"Supply and command","subtitleSource":"manual","titleOverridden":false,"categoryId":"c4","requestCount":6,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786998500000,"createdAt":1785444800000},{"sessionId":"k4","title":"English Proficiency Test Results","subtitle":"Me fail English? That's unpossible","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":14,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786989200000,"createdAt":1784148800000},{"sessionId":"k5","title":"Excavation Permit Application","subtitle":"Dad, I dug a hole","subtitleSource":"manual","titleOverridden":false,"requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786952000000,"createdAt":1781470400000},{"sessionId":"k6","title":"Neighbour Relations Working Group","subtitle":"Stupid sexy Flanders","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":9,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786856000000,"createdAt":1777496000000},{"sessionId":"o1","title":"Quarterly All-Hands Announcement","subtitle":"Good news, everyone!","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":5,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"model":"Claude Opus 5","contextWindow":200000,"promptTokens":191400,"lastActivityAt":1786999970000,"createdAt":1783544000000},{"sessionId":"o2","title":"Stakeholder Sentiment Analysis","subtitle":"It's the vibe of the thing","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":12,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"model":"Claude Sonnet 5","contextWindow":200000,"promptTokens":158200,"lastActivityAt":1786999520000,"createdAt":1786982720000},{"sessionId":"o3","title":"Root Cause Analysis Findings","subtitle":"Denial and error","subtitleSource":"manual","titleOverridden":false,"categoryId":"c4","requestCount":4,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"model":"Claude Haiku 4.5","contextWindow":128000,"promptTokens":24500,"lastActivityAt":1786996400000,"createdAt":1785963200000},{"sessionId":"o4","title":"Asset Relocation Final Approval","subtitle":"Straight to the pool room","subtitleSource":"manual","titleOverridden":false,"requestCount":3,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"model":"Auto","contextWindow":128000,"lastActivityAt":1786985600000,"createdAt":1786827200000},{"sessionId":"o5","title":"Debate Resolution Summary","subtitle":"It's a mute point","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":7,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"model":"Auto","contextWindow":200000,"promptTokens":9800,"lastActivityAt":1786940000000,"createdAt":1780520000000},{"sessionId":"o6","title":"Personal Grooming Policy Update","subtitle":"Get a fuckin' haircut","subtitleSource":"manual","titleOverridden":false,"categoryId":"c2","requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"model":"Claude Sonnet 5","contextWindow":200000,"promptTokens":104600,"lastActivityAt":1786868000000,"createdAt":1786222400000},{"sessionId":"o7","title":"Dairy Consumption Objectives","subtitle":"Here to drink milk and kick arse","subtitleSource":"llm","titleOverridden":false,"requestCount":6,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786760000000,"createdAt":1784753600000},{"sessionId":"m1","title":"Feline Welfare Housing Assessment","subtitle":"Frig off, the kitties are fine","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":9,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999964000,"createdAt":1786996544000},{"sessionId":"m2","title":"Competitive Strategy Alternatives","subtitle":"I'll build my own, with blackjack","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":13,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999700000,"createdAt":1785617600000},{"sessionId":"m3","title":"Overtime Authorisation Request","subtitle":"This is the worst kind of discrimination","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":4,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786998200000,"createdAt":1785185600000},{"sessionId":"m4","title":"Vendor Dispute Mediation Log","subtitle":"What are you, some kind of dick?","subtitleSource":"manual","titleOverridden":false,"categoryId":"c3","requestCount":6,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786984400000,"createdAt":1782248000000},{"sessionId":"m5","title":"Interior Design Review Panel","subtitle":"It's noice, different, unusual","subtitleSource":"manual","titleOverridden":false,"requestCount":2,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786928000000,"createdAt":1779396800000},{"sessionId":"m6","title":"Ancient Pizza Restaurant Rediscovery Programme","subtitle":"Archaeological evidence suggests anchovies remain unpopular","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":12,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786820000000,"createdAt":1775768000000},{"sessionId":"b1","title":"Knowledge Management and Learning","subtitle":"It's all water under the fridge","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":10,"activity":"active","autoApproving":false,"generating":false,"archived":false,"needsAttention":true,"lastActivityAt":1786999958000,"createdAt":1786995680000},{"sessionId":"b2","title":"Software Patch Rollback Procedure","subtitle":"Everything's coming up Milhouse","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":5,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786999760000,"createdAt":1786049600000},{"sessionId":"b3","title":"Military Sphere Threat Evaluation","subtitle":"The killbots have reached their limit","subtitleSource":"llm","titleOverridden":false,"categoryId":"c3","requestCount":8,"activity":"recent","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786998680000,"createdAt":1784494400000},{"sessionId":"b4","title":"Select a name for a new project","subtitle":"Why would it be between that or Muhammad?","subtitleSource":"manual","titleOverridden":true,"titleSource":"manual","categoryId":"c4","requestCount":3,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786991000000,"createdAt":1786481600000},{"sessionId":"b5","title":"Emergency Communication Protocol","subtitle":"Dear Sir/Madam, I am writing to inform you of a fire","subtitleSource":"llm","titleOverridden":false,"requestCount":7,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786916000000,"createdAt":1782939200000},{"sessionId":"k7","title":"Facilities Access Request Form","subtitle":"Frig off, I'm makin' cheeseburgers","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":10,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786760000000,"createdAt":1774904000000},{"sessionId":"k8","title":"Refreshment Procurement Schedule","subtitle":"Rum and Coke, boys","subtitleSource":"manual","titleOverridden":false,"requestCount":13,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786640000000,"createdAt":1773176000000},{"sessionId":"k9","title":"Automated Systems Failure Report","subtitle":"Sweet zombie Jesus","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":16,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786460000000,"createdAt":1771880000000},{"sessionId":"m7","title":"Employee Conduct Review Meeting","subtitle":"Shit apple doesn't fall far from the tree","subtitleSource":"manual","titleOverridden":false,"categoryId":"c1","requestCount":7,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786700000000,"createdAt":1774472000000},{"sessionId":"m8","title":"Noise Abatement Complaint","subtitle":"Frig off, Randy","subtitleSource":"llm","titleOverridden":false,"requestCount":10,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786520000000,"createdAt":1770584000000},{"sessionId":"b6","title":"Legal Representation Options","subtitle":"It's the Constitution, it's Mabo","subtitleSource":"llm","titleOverridden":false,"categoryId":"c1","requestCount":6,"activity":"idle","permissionLevel":"assisted","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786844000000,"createdAt":1782507200000},{"sessionId":"b7","title":"Public Transport Feasibility Study","subtitle":"Monorail!","subtitleSource":"manual","titleOverridden":false,"requestCount":9,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786748000000,"createdAt":1780952000000},{"sessionId":"b8","title":"Sanitation Department Proposal","subtitle":"Can't someone else do it?","subtitleSource":"llm","titleOverridden":false,"categoryId":"c2","requestCount":12,"activity":"idle","permissionLevel":"autoApprove","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"lastActivityAt":1786520000000,"createdAt":1771016000000},{"sessionId":"o8","title":"Nutritional Guidelines Update","subtitle":"You don't win friends with salad","subtitleSource":"llm","titleOverridden":false,"categoryId":"c4","requestCount":5,"activity":"idle","autoApproving":false,"generating":false,"archived":false,"needsAttention":false,"model":"Claude Haiku 4.5","contextWindow":128000,"promptTokens":61300,"lastActivityAt":1786640000000,"createdAt":1778532800000}];
 
 // view.js binds to #root and window messages, so each pane gets its own run with
 // those two things scoped to it
@@ -1039,7 +1200,7 @@ function mount(hostId, listSettings) {
 	let state = {
 		sessions: [], categories: [], settings: DEFAULT_SETTINGS, models: [], archivedCount: 0, collapsedGroups: []
 	};
-	let selectedId = null;
+	let activeId = null;
 	// last row scrolled to, so a repaint does not keep yanking the list back
 	let revealedId = null;
 	// null | 'categories' | 'settings' — one at a time, they are separate things
@@ -1068,6 +1229,9 @@ function mount(hostId, listSettings) {
 		unarchive: 'M20.55 5.22l-1.39-1.68A1.51 1.51 0 0 0 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.5c0-.49-.17-.93-.45-1.28zM12 9.5l5.5 5.5H14v2h-4v-2H6.5L12 9.5zM5.12 5l.82-1h12l.93 1H5.12z',
 		trash: 'M6 19c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
 		chevron: 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z',
+		boxEmpty: 'M19 5v14H5V5h14m0-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z',
+		boxSome: 'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-2 10H7v-2h10v2z',
+		boxAll: 'M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z',
 		grip: 'M9 4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM9 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM9 17a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z'
 	};
 
@@ -1118,14 +1282,40 @@ function mount(hostId, listSettings) {
 
 	// ── popovers ──────────────────────────────────────────────
 
-	// anchored under whichever button opened it, clamped to the pane so a menu opened on
-	// the right-hand edge of a narrow sidebar still lands fully on screen
-	function placePopover(popover, anchor) {
+	// where a menu wants to open. a button click puts it under the button; a right-click
+	// puts it under the pointer, which is the one thing every context menu on this desktop
+	// agrees on — the ⋯ button's box is the wrong answer for a gesture that never went
+	// near the button, and on a narrow sidebar it is always the same wrong answer
+	function anchorSpot(element) {
+		const box = element.getBoundingClientRect();
+		return { top: box.top, bottom: box.bottom, left: box.left };
+	}
+
+	// a context menu raised from the keyboard — Shift+F10, or the Menu key — arrives with
+	// no pointer behind it, and the 0,0 it carries is the corner of the pane rather than
+	// anywhere near the row. the row's own box is the honest answer there
+	function pointerSpot(event, fallback) {
+		return event.clientX > 0 || event.clientY > 0
+			? { top: event.clientY, bottom: event.clientY, left: event.clientX }
+			: anchorSpot(fallback);
+	}
+
+	// clamped to the pane so a menu opened at an edge still lands fully on screen, and
+	// flipped above the spot when there is no room below it. anchoring under a toolbar
+	// button never had to face that: right-clicking the last row of a long list does
+	function placePopover(popover, spot) {
 		document.body.appendChild(popover);
-		const box = anchor.getBoundingClientRect();
 		const width = popover.offsetWidth;
-		popover.style.top = (box.bottom + window.scrollY + 2) + 'px';
-		popover.style.left = Math.max(4, Math.min(box.left, window.innerWidth - width - 6)) + 'px';
+		const height = popover.offsetHeight;
+		const below = spot.bottom + 2;
+		const above = spot.top - height - 2;
+		// below by preference, above when the pane ran out of room down there, and pinned
+		// to the bottom when the menu is taller than both gaps
+		const top = below + height <= window.innerHeight - 4 ? below
+			: above >= 4 ? above
+				: Math.max(4, window.innerHeight - height - 4);
+		popover.style.top = (top + window.scrollY) + 'px';
+		popover.style.left = Math.max(4, Math.min(spot.left, window.innerWidth - width - 6)) + 'px';
 	}
 
 	function addAction(popover, label, run, className) {
@@ -1159,7 +1349,7 @@ function mount(hostId, listSettings) {
 	}
 
 	// the row's ⋯ menu: categories, then the two things that take a session out of the list
-	function openPopover(anchor, session) {
+	function openPopover(spot, session) {
 		closePopovers();
 		const popover = el('div', 'popover');
 
@@ -1200,14 +1390,14 @@ function mount(hostId, listSettings) {
 		addAction(popover, 'Delete…',
 			() => send({ type: 'deleteSession', sessionId: session.sessionId }), 'danger');
 
-		placePopover(popover, anchor);
+		placePopover(popover, spot);
 	}
 
 	// ── list menu ─────────────────────────────────────────────
 
 	// order and grouping are flipped often enough that burying them in the settings panel
 	// would be wrong, so they get their own menu rather than a row of radio buttons
-	function openListMenu(anchor) {
+	function openListMenu(spot) {
 		closePopovers();
 		const settings = state.settings;
 		const popover = el('div', 'popover');
@@ -1229,8 +1419,10 @@ function mount(hostId, listSettings) {
 		popover.appendChild(el('div', 'sep'));
 		addChoice(popover, 'Show archived', settings.showArchived,
 			() => send({ type: 'setSetting', key: 'showArchived', value: !settings.showArchived }));
+		addChoice(popover, 'Show model and context', settings.showModel,
+			() => send({ type: 'setSetting', key: 'showModel', value: !settings.showModel }));
 
-		placePopover(popover, anchor);
+		placePopover(popover, spot);
 	}
 
 	// ── categories panel ──────────────────────────────────────
@@ -1787,7 +1979,50 @@ function mount(hostId, listSettings) {
 		return pill;
 	}
 
+	// the model a chat is set to, and how full its context window is. only some providers
+	// write a prompt size into the session file, so the chip degrades to the bare model
+	// name rather than inventing a number, and it is absent entirely when the file never
+	// named a model — an empty chip on every row would be worse than no chip at all
+	function usageChip(session) {
+		if (!session.model) {
+			return undefined;
+		}
+		const limit = session.contextWindow;
+		const used = session.promptTokens;
+		// a prompt can be measured past the window the picker advertises — a model
+		// switched mid-chat, or a provider quoting a different ceiling than it enforces.
+		// the bar stops at full rather than running off its own track
+		const share = limit && used !== undefined ? Math.min(100, Math.round(used / limit * 100)) : undefined;
+
+		const chip = el('span', 'usage');
+		chip.appendChild(el('span', 'model-name', session.model));
+		if (share === undefined) {
+			chip.title = limit
+				? session.model + ' — a ' + limit.toLocaleString() + ' token window.'
+					+ ' This chat has not recorded how much of it the last prompt used.'
+				: session.model;
+			return chip;
+		}
+
+		const meter = el('span', 'meter');
+		const fill = el('span', 'fill');
+		fill.style.width = share + '%';
+		meter.appendChild(fill);
+		chip.appendChild(meter);
+		chip.appendChild(el('span', 'share', share + '%'));
+		// the point at which a long chat starts dropping its own history, and the point
+		// at which it is about to
+		chip.dataset.level = share >= 90 ? 'full' : share >= 75 ? 'high' : 'ok';
+		chip.title = session.model + ' — the last prompt was ' + used.toLocaleString()
+			+ ' of ' + limit.toLocaleString() + ' tokens (' + share + '%).'
+			+ ' It is the size of one prompt, not a running total.';
+		return chip;
+	}
+
 	function buildRow(session, now) {
+		// draw order is what a shift-click ranges over, and this is the one place every
+		// drawn row passes through
+		drawn.push(session.sessionId);
 		const category = state.categories.find(c => c.id === session.categoryId);
 		const wants = wantsAttention(session);
 		const row = el('li', 'row');
@@ -1798,15 +2033,19 @@ function mount(hostId, listSettings) {
 		if (session.turn) { row.dataset.turn = session.turn; }
 		if (session.archived) { row.classList.add('archived'); }
 		row.setAttribute('role', 'option');
-		row.setAttribute('aria-selected', String(session.sessionId === selectedId));
+		// aria-current for the one chat the pane has opened, aria-selected for the ticked
+		// set — they are different questions and a listbox has a word for each
+		row.setAttribute('aria-current', String(session.sessionId === activeId));
+		row.setAttribute('aria-selected', String(selected.has(session.sessionId)));
+		if (selected.has(session.sessionId)) { row.dataset.selected = 'true'; }
 
 		if (category) {
 			row.dataset.category = category.id;
 			row.style.setProperty('--row-colour', category.colour);
 			row.style.setProperty('--dot-colour', category.colour);
 		}
-		if (session.sessionId === selectedId) {
-			row.classList.add('selected');
+		if (session.sessionId === activeId) {
+			row.classList.add('active');
 		}
 
 		// ── title row ─────────────────────────────────────────
@@ -1879,7 +2118,7 @@ function mount(hostId, listSettings) {
 		menuButton.setAttribute('aria-label', 'Category for ' + session.title);
 		menuButton.addEventListener('click', event => {
 			event.stopPropagation();
-			openPopover(menuButton, session);
+			openPopover(anchorSpot(menuButton), session);
 		});
 		titleActions.appendChild(menuButton);
 		if (armed === session.sessionId + ':title') {
@@ -1939,6 +2178,13 @@ function mount(hostId, listSettings) {
 			subtitleActions.classList.add('has-armed');
 		}
 		subtitleLine.appendChild(subtitle);
+		// on the quiet line rather than up with the title: the title line already carries
+		// every pill this view has, and a model name is long enough to take a sidebar's
+		// whole width away from them
+		const usage = state.settings.showModel ? usageChip(session) : undefined;
+		if (usage) {
+			subtitleLine.appendChild(usage);
+		}
 		subtitleLine.appendChild(subtitleActions);
 
 		row.appendChild(top);
@@ -1950,17 +2196,123 @@ function mount(hostId, listSettings) {
 			row.addEventListener('pointerdown', event => startSessionDrag(event, row));
 		}
 
-		row.addEventListener('click', () => open(session.sessionId));
+		row.addEventListener('click', event => {
+			// the two modifiers every list on this desktop already uses for the job
+			if (event.ctrlKey || event.metaKey) { toggleSelected(session.sessionId); return; }
+			if (event.shiftKey) { selectRange(session.sessionId); return; }
+			// and a plain click means "open this one", which also means "not that set"
+			const had = clearSelection();
+			open(session.sessionId);
+			if (had) { render(); }
+		});
 		row.addEventListener('contextmenu', event => {
 			event.preventDefault();
-			openPopover(menuButton, session);
+			openPopover(pointerSpot(event, row), session);
 		});
 		return row;
 	}
 
 	function open(sessionId) {
-		selectedId = sessionId;
+		activeId = sessionId;
 		send({ type: 'open', sessionId });
+	}
+
+	// ── selecting a set of chats ──────────────────────────────
+
+	// the chats ticked for a bulk action. deliberately not the same thing as activeId,
+	// which is the one chat the pane has opened — a set gets acted on without any of it
+	// being opened, and the two need different words or they end up meaning each other
+	let selected = new Set();
+	// where a shift-click measures its range from
+	let anchorId = null;
+	// every row drawn, in draw order, so a shift-click knows what lies between two of them
+	let drawn = [];
+
+	function clearSelection() {
+		if (!selected.size) { return false; }
+		selected = new Set();
+		anchorId = null;
+		return true;
+	}
+
+	function toggleSelected(sessionId) {
+		if (selected.has(sessionId)) { selected.delete(sessionId); } else { selected.add(sessionId); }
+		anchorId = sessionId;
+		render();
+	}
+
+	// everything drawn between the anchor and here, inclusive. a collapsed group has no
+	// rows in the list, so none of its chats are in the range either — which is the right
+	// answer for a gesture that means "these ones, the ones I can see"
+	function selectRange(sessionId) {
+		const to = drawn.indexOf(sessionId);
+		const from = anchorId === null ? to : drawn.indexOf(anchorId);
+		if (to === -1 || from === -1) {
+			toggleSelected(sessionId);
+			return;
+		}
+		for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
+			selected.add(drawn[i]);
+		}
+		render();
+	}
+
+	// how much of a group is ticked, which is what its heading's box has to draw
+	function coverage(sessionIds) {
+		const hits = sessionIds.filter(id => selected.has(id)).length;
+		return hits === 0 ? 'none' : hits === sessionIds.length ? 'all' : 'some';
+	}
+
+	function toggleGroupSelection(sessionIds) {
+		const whole = coverage(sessionIds) === 'all';
+		for (const id of sessionIds) {
+			if (whole) { selected.delete(id); } else { selected.add(id); }
+		}
+		anchorId = whole ? null : sessionIds[sessionIds.length - 1];
+		render();
+	}
+
+	// while anything is ticked this stands where the toolbar stands, rather than under it.
+	// the actions here are the only ones that mean anything mid-selection, and taking the
+	// same sticky slot means the count and the button cannot be scrolled away from
+	function buildSelectionBar() {
+		const bar = el('div', 'toolbar selecting');
+		bar.appendChild(el('span', 'count', selected.size + ' selected'));
+		bar.appendChild(el('div', 'spacer'));
+
+		const chosen = state.sessions.filter(session => selected.has(session.sessionId));
+		const loose = chosen.filter(session => !session.archived).map(session => session.sessionId);
+		const away = chosen.filter(session => session.archived).map(session => session.sessionId);
+
+		// each button says how many it will move, and is absent when it would move none.
+		// a mixed selection gets both, because it genuinely has both to offer
+		if (loose.length) {
+			bar.appendChild(bulkButton('Archive', loose, true));
+		}
+		if (away.length) {
+			bar.appendChild(bulkButton('Restore', away, false));
+		}
+
+		const clear = el('button', null, 'Clear');
+		clear.title = 'Clear the selection (Escape)';
+		clear.addEventListener('click', () => { clearSelection(); render(); });
+		bar.appendChild(clear);
+		return bar;
+	}
+
+	function bulkButton(label, sessionIds, archived) {
+		const button = el('button', 'bulk', label + ' ' + sessionIds.length);
+		button.title = label + ' ' + sessionIds.length + (sessionIds.length === 1 ? ' chat' : ' chats')
+			+ '. Archiving is reversible — nothing is deleted.';
+		button.addEventListener('click', () => {
+			// with archived rows hidden these are about to leave the list, and a selection
+			// pointing at rows that are gone is not one. repaint now rather than waiting for
+			// the round trip, or the bar sits there counting chats that have moved
+			clearSelection();
+			render();
+			send({ type: 'setArchivedMany', sessionIds: sessionIds, archived: archived });
+		});
+		return button;
 	}
 
 	// ── dragging a chat into another group ────────────────────
@@ -2052,6 +2404,11 @@ function mount(hostId, listSettings) {
 		let committing = true;
 		let frame = 0;
 
+		// what this drag is carrying: the ticked set if this row is one of them, else itself
+		const dragged = () => selected.has(row.dataset.sessionId) && selected.size > 1
+			? [...selected]
+			: [row.dataset.sessionId];
+
 		const paint = () => {
 			group = groupUnder(list, y);
 			paintDropGroup(list, row, group);
@@ -2067,8 +2424,17 @@ function mount(hostId, listSettings) {
 				dragging = true;
 				draggingSessionId = row.dataset.sessionId;
 				row.classList.add('dragging');
+				// picking up one of a ticked set picks up the set. leaving the other rows
+				// behind would be the surprising reading of the gesture
+				const carrying = dragged();
 				const titled = row.querySelector('.title');
-				chip = dragChip(titled ? titled.textContent : '', x, y);
+				chip = dragChip(carrying.length > 1
+					? carrying.length + ' chats'
+					: (titled ? titled.textContent : ''), x, y);
+				for (const id of carrying) {
+					const other = list.querySelector('.row[data-session-id="' + id + '"]');
+					if (other) { other.classList.add('dragging'); }
+				}
 				try {
 					row.setPointerCapture(moved.pointerId);
 				} catch (error) {
@@ -2105,8 +2471,10 @@ function mount(hostId, listSettings) {
 			const landed = committing && canDropInto(row, group);
 			const into = group ? group.dataset.groupId : null;
 			if (chip) { chip.remove(); }
-			row.classList.remove('dragging');
-			for (const node of list.children) { delete node.dataset.dropInto; }
+			for (const node of list.children) {
+				delete node.dataset.dropInto;
+				node.classList.remove('dragging');
+			}
 			draggingSessionId = null;
 
 			// letting go of a chat is not clicking it, but the browser sends a click either
@@ -2117,11 +2485,11 @@ function mount(hostId, listSettings) {
 			setTimeout(() => document.removeEventListener('click', swallow, true), 0);
 
 			if (landed) {
-				send({
-					type: 'setCategory',
-					sessionId: row.dataset.sessionId,
-					categoryId: into === 'uncategorised' ? null : into
-				});
+				const moving = dragged();
+				const categoryId = into === 'uncategorised' ? null : into;
+				send(moving.length > 1
+					? { type: 'setCategoryMany', sessionIds: moving, categoryId: categoryId }
+					: { type: 'setCategory', sessionId: moving[0], categoryId: categoryId });
 			} else {
 				// nothing changed, so nothing is coming back to repaint this — and a repaint
 				// may have been held off while the pointer was down
@@ -2184,8 +2552,9 @@ function mount(hostId, listSettings) {
 	// works the same way in either place instead of two idioms doing the same thing
 	function appendGroupSection(list, id, label, colour, sessions, now) {
 		const collapsed = isGroupCollapsed(id);
-		const containsSelected = sessions.some(session => session.sessionId === selectedId);
-		list.appendChild(sectionHeader(label, sessions.length, colour, id, collapsed, containsSelected));
+		const containsActive = sessions.some(session => session.sessionId === activeId);
+		list.appendChild(sectionHeader(label, sessions.map(session => session.sessionId),
+			colour, id, collapsed, containsActive));
 		if (collapsed) { return; }
 		for (const session of sessions) {
 			list.appendChild(buildRow(session, now));
@@ -2194,7 +2563,7 @@ function mount(hostId, listSettings) {
 
 	// the whole heading toggles, not just a chevron button — a bigger target beats a
 	// precise one for something clicked this often
-	function sectionHeader(label, count, colour, groupId, collapsed, containsSelected) {
+	function sectionHeader(label, sessionIds, colour, groupId, collapsed, containsActive) {
 		const header = el('li', 'group');
 		header.setAttribute('role', 'button');
 		header.tabIndex = 0;
@@ -2210,11 +2579,29 @@ function mount(hostId, listSettings) {
 		if (colour) { swatch.style.setProperty('--swatch', colour); }
 		header.appendChild(swatch);
 		header.appendChild(el('span', 'group-name', label));
-		header.appendChild(el('span', 'group-count', String(count)));
+		header.appendChild(el('span', 'group-count', String(sessionIds.length)));
+
+		// selecting a whole group is the point of this control, so it reads the group's
+		// chats rather than its rows — a collapsed group has none of the latter and its
+		// heading still ticks every one of the former
+		const cover = coverage(sessionIds);
+		const pick = el('button', 'pick');
+		pick.dataset.coverage = cover;
+		pick.appendChild(icon(cover === 'all' ? 'boxAll' : cover === 'some' ? 'boxSome' : 'boxEmpty', 14));
+		pick.title = (cover === 'all' ? 'Deselect these ' : 'Select these ') + sessionIds.length;
+		pick.setAttribute('aria-label', pick.title + ' in ' + label);
+		pick.setAttribute('aria-checked', cover === 'all' ? 'true' : cover === 'some' ? 'mixed' : 'false');
+		pick.setAttribute('role', 'checkbox');
+		pick.addEventListener('click', event => {
+			// the whole heading toggles the fold, so this has to keep its click to itself
+			event.stopPropagation();
+			toggleGroupSelection(sessionIds);
+		});
+		header.appendChild(pick);
 		const toggle = () => {
 			// about to bring the selected row back into the dom — let the reveal check
 			// below fire again once it's there, or it stays scrolled wherever it landed
-			if (collapsed && containsSelected) { revealedId = null; }
+			if (collapsed && containsActive) { revealedId = null; }
 			send({ type: 'toggleGroupCollapsed', groupId });
 		};
 		header.addEventListener('click', toggle);
@@ -2228,27 +2615,7 @@ function mount(hostId, listSettings) {
 		return header;
 	}
 
-	function render() {
-		const now = Date.now();
-		closePopovers();
-		// whatever had focus is about to be torn out from under itself. two things here can
-		// survive that: a group heading, and — one panel over, where a keyboard move repaints
-		// the list the handle lives in — a reorder grip. without the second, the next ↓ in a
-		// run of them has nothing focused left to act on
-		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		const focusedGroupId = focused && focused.classList.contains('group')
-			? focused.dataset.groupId
-			: null;
-		const focusedGripId = focused && focused.classList.contains('grip')
-			? focused.dataset.categoryId
-			: null;
-		root.textContent = '';
-
-		const live = state.sessions.filter(session => !session.archived);
-		const archived = state.sessions.filter(session => session.archived);
-		// archived rows are out of sight by definition, so they don't get to ask for you
-		const unread = live.filter(wantsAttention).length;
-
+	function buildToolbar(live, unread) {
 		const toolbar = el('div', 'toolbar');
 		const categories = el('button', openPanel === 'categories' ? 'active' : null, 'Categories');
 		categories.title = openPanel === 'categories' ? 'Close categories' : 'Categories';
@@ -2279,7 +2646,7 @@ function mount(hostId, listSettings) {
 		sort.setAttribute('aria-label', 'Sort, group and archived');
 		sort.addEventListener('click', event => {
 			event.stopPropagation();
-			openListMenu(sort);
+			openListMenu(anchorSpot(sort));
 		});
 		toolbar.appendChild(sort);
 
@@ -2302,7 +2669,39 @@ function mount(hostId, listSettings) {
 		extensions.addEventListener('click', () => send({ type: 'openInExtensions' }));
 		toolbar.appendChild(extensions);
 
-		root.appendChild(toolbar);
+		return toolbar;
+	}
+
+	function render() {
+		const now = Date.now();
+		closePopovers();
+		// whatever had focus is about to be torn out from under itself. two things here can
+		// survive that: a group heading, and — one panel over, where a keyboard move repaints
+		// the list the handle lives in — a reorder grip. without the second, the next ↓ in a
+		// run of them has nothing focused left to act on
+		const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const focusedGroupId = focused && focused.classList.contains('group')
+			? focused.dataset.groupId
+			: null;
+		const focusedGripId = focused && focused.classList.contains('grip')
+			? focused.dataset.categoryId
+			: null;
+		root.textContent = '';
+		drawn = [];
+
+		// a selection pointing at chats that are no longer in the list is not a selection.
+		// archiving with the archived block hidden takes them straight out from under it
+		const present = new Set(state.sessions.map(session => session.sessionId));
+		for (const id of [...selected]) {
+			if (!present.has(id)) { selected.delete(id); }
+		}
+
+		const live = state.sessions.filter(session => !session.archived);
+		const archived = state.sessions.filter(session => session.archived);
+		// archived rows are out of sight by definition, so they don't get to ask for you
+		const unread = live.filter(wantsAttention).length;
+
+		root.appendChild(selected.size ? buildSelectionBar() : buildToolbar(live, unread));
 
 		if (openPanel === 'categories') {
 			const panel = buildCategoriesPanel();
@@ -2322,6 +2721,7 @@ function mount(hostId, listSettings) {
 		const list = el('ul', 'list');
 		list.setAttribute('role', 'listbox');
 		list.setAttribute('aria-label', 'Chat sessions');
+		list.setAttribute('aria-multiselectable', 'true');
 
 		// collapsed rows are left out of the DOM entirely rather than hidden with css —
 		// this view already does a full teardown/rebuild every render, so there's no
@@ -2351,9 +2751,9 @@ function mount(hostId, listSettings) {
 		}
 
 		// a selection you cannot see is not a selection, and an adopted row can be anywhere
-		if (selectedId && selectedId !== revealedId) {
-			revealedId = selectedId;
-			const chosen = list.querySelector('.row.selected');
+		if (activeId && activeId !== revealedId) {
+			revealedId = activeId;
+			const chosen = list.querySelector('.row.active');
 			if (chosen && chosen.scrollIntoView) {
 				chosen.scrollIntoView({ block: 'nearest' });
 			}
@@ -2373,7 +2773,11 @@ function mount(hostId, listSettings) {
 	document.addEventListener('click', closePopovers);
 
 	document.addEventListener('keydown', event => {
-		if (event.key === 'Escape') { closePopovers(); return; }
+		if (event.key === 'Escape') {
+			closePopovers();
+			if (clearSelection()) { render(); }
+			return;
+		}
 		if (editingSubtitleFor) { return; }
 		if (event.key === 'ArrowDown') { event.preventDefault(); focusOffset(1); }
 		else if (event.key === 'ArrowUp') { event.preventDefault(); focusOffset(-1); }
@@ -2381,7 +2785,9 @@ function mount(hostId, listSettings) {
 			const active = document.activeElement;
 			if (active instanceof HTMLElement && active.dataset.sessionId) {
 				event.preventDefault();
-				open(active.dataset.sessionId);
+				// the keyboard's version of a ctrl-click, so a set can be built without a mouse
+				if (event.ctrlKey || event.metaKey) { toggleSelected(active.dataset.sessionId); }
+				else { open(active.dataset.sessionId); }
 			}
 		}
 	});
@@ -2397,7 +2803,7 @@ function mount(hostId, listSettings) {
 			// the provider owns the selection once anything has been opened, so a row adopted
 			// after a new chat lands shows up without the user clicking it
 			if (message.activeSessionId !== undefined) {
-				selectedId = message.activeSessionId;
+				activeId = message.activeSessionId;
 			}
 			state = {
 				sessions: message.sessions,
@@ -2436,9 +2842,11 @@ function mount(hostId, listSettings) {
 }
 
 // dark shows the new list shape: grouped by category, archived section at the bottom.
-// light keeps the settings panel open and hides archived, so the footer count shows
-mount('host-dark', { sortBy: 'activity', groupBy: 'category', showArchived: true });
-mount('host-light', { sortBy: 'created', groupBy: 'none', showArchived: false });
+// light keeps the settings panel open and hides archived, so the footer count shows.
+// both draw the model chip — it has to survive a category wash and an archived row,
+// and this is the only place either can be looked at
+mount('host-dark', { sortBy: 'activity', groupBy: 'category', showArchived: true, showModel: true });
+mount('host-light', { sortBy: 'created', groupBy: 'none', showArchived: false, showModel: true });
 </script>
 </body>
 </html>

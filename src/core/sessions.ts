@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { scanSessionDeltas } from './deltaScan';
 import { normalisePermissionLevel } from './permissions';
+import { readSelectedModel, SelectedModel } from './sessionModel';
 
 // session files are append-structured jsonl — a kind:0 snapshot then patch records
 // the snapshot goes stale immediately, so titles and counts come from the patch log
@@ -32,6 +33,12 @@ export interface ChatSessionInfo {
 	// what the next request in this session will run as, not what past ones ran as — the
 	// per-request level sits past the delta scan's prefix cap and is not worth the read
 	permissionLevel: string;
+	// what the model picker is set to, and how big that model's window is. absent when
+	// the file never named one
+	model?: SelectedModel;
+	// the newest prompt size the file reports, absent when the provider does not report
+	// one or the file is too big to have read it here — the live tracker covers that case
+	promptTokens?: number;
 	filePath: string;
 	fileSize: number;
 	parseError?: string;
@@ -98,6 +105,7 @@ interface HeaderFields {
 	createdAt: number;
 	requestCount: number;
 	permissionLevel?: string;
+	model?: SelectedModel;
 	parseError?: string;
 }
 
@@ -134,7 +142,8 @@ export function parseSessionHeader(line: string): HeaderFields {
 			firstRequestText: firstRequestText(header),
 			createdAt: typeof header.creationDate === 'number' ? header.creationDate : 0,
 			requestCount: Array.isArray(header.requests) ? header.requests.length : 0,
-			permissionLevel: normalisePermissionLevel(header.inputState?.permissionLevel)
+			permissionLevel: normalisePermissionLevel(header.inputState?.permissionLevel),
+			model: readSelectedModel(header.inputState?.selectedModel)
 		};
 	} catch (error) {
 		return {
@@ -363,6 +372,14 @@ export async function readSession(filePath: string): Promise<ChatSessionInfo> {
 		// unlike the title, the header value here is live at creation and only goes stale
 		// once the picker moves, which is exactly what the delta carries
 		permissionLevel: deltas.permissionLevel ?? header.permissionLevel ?? 'default',
+		// same bargain, one field over. an oversized header has no model to offer at all —
+		// vs code writes inputState after the requests array, so a fork's embedded history
+		// pushes it past the prefix cap — and a delta is the only route there
+		model: deltas.model ?? header.model,
+		// a truncated scan read the *start* of a long file, so its newest prompt size is
+		// an old one. an old context reading is worse than none: it would say a chat is
+		// a tenth full when it is nearly out of room
+		promptTokens: deltas.truncated ? undefined : deltas.promptTokens,
 		filePath,
 		fileSize: stat.size,
 		parseError: header.parseError

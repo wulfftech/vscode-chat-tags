@@ -67,6 +67,9 @@ export interface ListPreferences {
 	sortBy: 'activity' | 'created';
 	groupBy: 'none' | 'category';
 	showArchived: boolean;
+	// the model each chat is set to, and how full its context is. off by default because
+	// it is a second thing per row for a question most rows never raise
+	showModel: boolean;
 }
 
 export function readListPreferences(): ListPreferences {
@@ -76,7 +79,8 @@ export function readListPreferences(): ListPreferences {
 	return {
 		sortBy: sortBy === 'created' ? 'created' : 'activity',
 		groupBy: groupBy === 'category' ? 'category' : 'none',
-		showArchived: config.get<boolean>('showArchived', false)
+		showArchived: config.get<boolean>('showArchived', false),
+		showModel: config.get<boolean>('showModel', false)
 	};
 }
 

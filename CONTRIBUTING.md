@@ -355,6 +355,45 @@ A category with no chats in it draws no group, so there is nowhere to drop one t
 
 There is no probe for this one. Everything it decides — which group the pointer is in, whether that group can take the chat, how far to scroll — lives in `media/view.js` and reaches nothing a node script can require. What it ends up sending is `setCategory`, which is the same message the `⋯` menu has always sent.
 
+## Selecting a set of chats
+
+Two things in this view wanted the word "selected" and they are not the same thing: the one chat the pane has opened, and the set of chats ticked for a bulk action. The first was renamed to **active** — `activeId`, `.row.active`, `aria-current` — which is what the provider had always called it (`activeSessionId`), and **selected** now means the set, with `aria-selected` and `aria-multiselectable` carrying it. Leaving both called "selected" was the shortest road to a bug that only shows up on someone else's machine.
+
+**Ticked rows are drawn twice over.** A tint, and a change of shape. The tint is a `::before` overlay for the same reason the drop target's is an `::after` one — the row underneath is already carrying a category wash, a hover, or the opened-row background, and the selection has to read the same over all three. And it deliberately does **not** use `list.inactiveSelectionBackground`, which is what the name suggests: that colour is opaque in every stock theme, so laying it over a row paints the category wash out entirely. It mixes `list.activeSelectionBackground` to 55% instead.
+
+The shape change is the dot going from a circle to a rounded square. A tint alone is too easy to lose against a row already washed with its category colour, and shape costs no layout — growing the dot instead would shift every title sideways as rows went in and out of the set.
+
+### The group heading's tick
+
+It reads the group's **chats**, not its rows. A collapsed group has no rows in the DOM at all — that is how collapse is implemented here — and its heading still ticks every chat in it. `sectionHeader` takes the session ids rather than a count for exactly this; the count is `sessionIds.length`.
+
+Three states, because two would lie: solid when all of a group is ticked, a dash when only some is, empty when none. It sits inside a heading whose whole area toggles the fold, so it stops its own click from getting there.
+
+### The bar stands where the toolbar stands
+
+Not underneath it. The toolbar is `position: sticky; top: 0`, and a second bar below it would need to know the first one's height to stick under it — a number that changes with the font. Taking the same slot inherits the stickiness for free, and the count and the Archive button cannot be scrolled away from. Nothing in the toolbar is any use mid-selection anyway.
+
+Each button counts only what it would actually move, and is absent when that count is zero. A mixed selection gets both **Archive** and **Restore**; neither is ever a no-op you have to guess at.
+
+### Bulk writes are one write
+
+`setArchivedMany` and `setCategoryMany` take the list, write the memento once and fire `onDidChange` once. Archiving eighty chats one call at a time would be eighty writes and eighty repaints. An already-archived chat keeps the date it already had — the same rule `seedArchived` follows, so a bulk pass over a list that happens to include it does not restamp it — and a pass that changes nothing writes nothing.
+
+`probe:archive` covers both, including the count each returns, that the seed's one-way flag is never set by a hand archive, and that archiving and categorising stay on separate axes.
+
+### Not stealing the click, again
+
+The bulk actions ride on top of two gestures that already existed on a row, and both had to keep working:
+
+- **A plain click still opens the chat**, and abandons the selection while it does. That is the bargain every list on this desktop makes.
+- **Dragging a ticked row carries the whole set.** Leaving the other nineteen behind is the surprising reading of that gesture. `dragged()` returns the set if the row under the pointer is in it, else just that row, and the chip says `N chats` instead of a title.
+
+**Verified in the browser harness, not in a live VS Code window.** Sixteen cases through dispatched events against the real compiled `view.js`: group tick and untick, tri-state coverage, ctrl-click, shift-range, a range crossing a group boundary, a mixed live/archived selection producing `Archive 1 / Restore 2`, both actions' message shapes, Clear, Escape, a plain click clearing the set, ctrl+Enter from the keyboard, dragging one of a ticked set (`setCategoryMany` ×6, chip reads "6 chats", six rows dimmed), dragging one outside it (single `setCategory`, set untouched), a collapsed group ticking whole, and the post-drop click being swallowed exactly once.
+
+The clicks were dispatched rather than made with a real mouse: the Browser pane in this session accepted screenshots but timed out on real input. Modifier clicks go through the same listener path with no capture or retargeting subtleties — unlike the drag, which *was* driven with a real mouse when that feature was built — but that is the gap.
+
+One trap worth writing down because it cost time twice: a suite that runs synchronously will have its next click eaten by the previous drop's one-shot click-swallow, which only comes off on the next turn of the event loop. Two results read as product bugs and were neither. Put an `await` between cases.
+
 ## Icons
 
 One source logo, three derivatives, built by `scripts/build-icons.ps1`:
@@ -599,6 +638,66 @@ So `sessionsView` only reads a turn as live when the file has also moved inside 
 The approval reading baselines at activation and reads nothing behind it, because the workbench's approval map is per-window. Turn state is the opposite: a turn open when the extension host started is a fact about the window we are in.
 
 So the first pass reads the last 256 KB of each file and keeps only the turn state out of it — the offset still lands at the end, so those history bytes never reach the approval reading. Truncation can only ever make the machine say less: starting mid-file leaves it unarmed, and unarmed means unknown, which is the behaviour there was before any of this.
+
+## Model, and how full its window is
+
+Two readings, one setting, three readers — and the interesting rule is the one about when *not* to answer.
+
+Both facts are in the session file. The picker's value is `inputState.selectedModel`, written into the header at creation and re-written as a patch every time it moves, which is exactly the shape `permissionLevel` already has. Usage is `requests[n].promptTokens`: the size of the prompt actually sent, patched over and over as a turn runs.
+
+`readSelectedModel` in `core/sessionModel.ts` is the only place that knows the shape. `metadata.name` is the label — `Auto` stays `Auto`, because that genuinely is what the chat is set to and the model Auto resolved to is buried in a request payload past every cheap read here — and `metadata.maxInputTokens` is the window. A nameless entry falls back to the identifier, which is ugly and still beats a blank.
+
+### promptTokens is one prompt, not a total
+
+Measured across a real 49 MB session: it climbs within a turn as tool results accumulate — request 5 went 63,601 to 394,984 across fifty-two records — and it *falls* between turns when the conversation gets trimmed. That is why it is a live context reading rather than a running cost, and why the tooltip says so.
+
+### Why two readers, and what each is for
+
+| Reader | Sees | Used for |
+|---|---|---|
+| `scanSessionDeltas` | forward from the start, 4 MB cap | the model, and the prompt size while the file is small enough |
+| `SessionLiveTracker` | the last 256 KB at startup, then every appended byte | the prompt size, including while it moves |
+
+The forward pass already ran for the title, so the model costs nothing and rides the same mtime-and-size cache. The tail pass is the only one that can watch a number change, which is the entire point of this reading.
+
+**A truncated forward scan drops its prompt size on the floor.** Past the byte cap the last record read is an *early* one, and an early prompt size does not merely lack precision — it says a chat is a tenth full when it is nearly out of room. So `readSession` returns it only when `truncated` is false, and the tail pass covers the rest. The model is kept either way, because a model name one change behind is a much smaller lie than a wrong percentage.
+
+### The needle
+
+`,"promptTokens"],"v":` and then a run of digits, read as bytes in the same ordered pass as the other five. The closing bracket is part of the needle so `promptTokenDetails` — which shares the prefix and carries an array of percentages — cannot be mistaken for it. A digit run that reaches the end of a chunk is dropped rather than guessed, exactly as the model state's single digit is, and the overlap reads the whole record on the next pass.
+
+Counted two ways over the session files on this machine, raw byte search against a structural pass over record heads: 1102 hits, agreeing exactly. `scanTail` over all 59 files, 120 MB, returned the same value a structural pass did in every one.
+
+### What it deliberately does not say
+
+- **A chat whose provider never reported a size gets the model alone.** Eighteen of the 59 sessions here carry a count; the other 41 say nothing and nothing is invented for them.
+- **Two of those eighteen start blank.** Their newest measurement sits 3.6 MB and 13.7 MB back from the end of the file, past both the 256 KB seed window and the 4 MB forward cap. They fill in the moment the chat next writes anything.
+- **A fork names no model.** VS Code writes `inputState` *after* the requests array, so a fork's embedded history pushes it past the header prefix cap, and only a delta can recover it. One such file on this machine has a usable token count and no model — and draws no chip, because a raw token count with no window to measure it against is not a context reading.
+
+### The colour is not the obvious token
+
+`inputValidation.warningForeground` is what the elevated permission pill asks for, and it is `null` in all four stock themes — the pill only reads amber because its colour comes from `warningBackground` and `warningBorder`. As a *text* colour it resolves to plain foreground, so the chip uses `editorWarning.foreground` and `errorForeground`, both of which every base theme defines. Both harnesses carry the stock values now; without them the preview would have shown a full context looking exactly like an empty one.
+
+### The chip loses no fight it should win
+
+It sits at the end of the subtitle line, and the two of them are competing for a sidebar's width. `flex-shrink: 0` on the chip against the subtitle's `1`, capped at 55% of the line. Letting them shrink together looked reasonable and was measurably wrong: at a 340px pane the model name ellipsized away to nothing and the chip drew a bar with no indication of what it was measuring. Within the chip only the name gives — the meter and the number are both `flex: 0 0 auto`, so what gets cut is never the reading.
+
+### Verified
+
+`npm run probe:model` — 33 checks over the shape, the forward pass, the tail pass and the merge, including a `selectedModel` value cut by the record prefix cap, a file past the forward cap, and a prompt size whose digits straddle a 256 KB chunk boundary. Against real data: `readSession` and the tracker agreed on all twelve sessions where both had a number, and disagreed on none.
+
+The chip itself was eyeballed in `dev/preview.html` at a real 340px pane in both themes, with the widths measured rather than judged by eye.
+
+## Where a menu opens
+
+`placePopover` takes a spot, not an anchor. `anchorSpot(element)` is the button case, `pointerSpot(event, row)` the right-click one — a context menu that ignores where the mouse was is the one thing every desktop menu agrees on, and on a narrow sidebar the `⋯` button's box was always the same wrong answer.
+
+Two things fall out of moving it:
+
+- **It flips above the spot when there is no room below.** Anchoring under a toolbar button never had to face that; right-clicking the last row of a long list does. Below by preference, above when the pane ran out of room down there, and pinned to the bottom when the menu is taller than both gaps.
+- **A keyboard-raised menu carries no pointer.** Shift+F10 and the Menu key both arrive as a `contextmenu` event with `clientX`/`clientY` at zero, which is the corner of the pane rather than anywhere near the row. `pointerSpot` falls back to the row's own box when both are zero.
+
+Driven with a real right-click in the harness: at the pointer for a mid-list row, flipped above it for one 60px off the bottom of a 1017px viewport, and still under the button for both the `⋯` and sort buttons.
 
 ## Navigation spike
 

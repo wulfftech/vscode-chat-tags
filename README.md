@@ -97,6 +97,16 @@ If your machine has the auto-approve permission levels locked out by policy, tha
 
 One honest limit: it shows what the **next** message in that chat will run as, not what the old ones ran as. Change the level today and the pill changes today, even though yesterday's messages ran under the old one.
 
+## What each chat is running on
+
+Off unless you ask for it — **Show model and context**, in the sort menu. Turn it on and each row picks up a small reading at the end of its subtitle: the model that chat is set to, a bar, and how full that model's context window is.
+
+Both numbers come out of the chat's own file. The name is whatever the model picker says, which means a chat set to **Auto** reads *Auto* — the model Auto actually reached for on a given turn is written deep inside the request payload, well past anything worth reading to draw a list. The percentage is the size of the **last prompt sent**, measured against the window that model advertises. It is one prompt, not a running total: it climbs through a turn as tool results pile onto it, and drops back when the conversation gets trimmed.
+
+Past three-quarters full it goes amber, past nine-tenths it goes red. That is the point where a long chat starts quietly dropping its own early history, which is worth seeing on the list rather than discovering in an answer.
+
+Plenty of chats will show a model and no percentage, and that's not a bug in the reading. Only some providers write a prompt size into the session file at all; where none was ever written, none is invented. The other blank case is a session large enough that its newest measurement sits past the cheap read — it fills in the moment that chat next says anything.
+
 ## Ordering and grouping
 
 Two orders, in the sort menu:
@@ -115,6 +125,24 @@ That order is yours to set. Each row in the **Categories** panel has a handle on
 With the list in groups, a chat moves between them by being dragged there. Pick one up, and the group under the pointer lights up as the place it will land; let go and it belongs to that category. **Uncategorised** is a target like any other, so dragging out is how you take a category off a chat. The **Archived** block is not — archiving is its own thing and lives on the `⋯` menu.
 
 A row still opens the chat when you click it. A press only becomes a drag once the pointer has moved far enough that it cannot have been meant as a click, and the click that would otherwise follow the drop is thrown away — releasing a chat onto a heading should not also fold that heading away.
+
+## Selecting more than one
+
+Ctrl-click (⌘-click) rows to tick them, shift-click for a run, or hit the tick that appears on any group heading to take the whole group — collapsed groups included, since the heading knows its chats whether or not their rows are drawn. The heading's box fills in solid when all of a group is ticked and shows a dash when only some of it is.
+
+Ticked rows go a shade of the theme's selection colour and their dot turns square. Shape rather than size, so nothing shifts sideways as rows go in and out of the set, and the row's own signals — the left border, the pills, the category wash — all still read through it.
+
+While anything is ticked, the toolbar is replaced by a bar saying how many, with the actions:
+
+| Button | Does |
+|---|---|
+| **Archive N** | Archives every ticked chat that isn't already archived |
+| **Restore N** | Brings back every ticked chat that is |
+| **Clear** | Drops the selection. Escape does the same |
+
+A mixed selection gets both buttons, each counting only the chats it would actually move. Neither appears when it would move nothing. And dragging any ticked row carries the whole set into the group you drop it on, rather than leaving the rest behind.
+
+A plain click still opens a chat, and doing that abandons the selection — the same bargain every list on your desktop makes.
 
 ## Archiving and deleting
 
@@ -281,7 +309,7 @@ Order and grouping get their own menu instead of a row of radio buttons behind t
 
 Whichever panel is open, its button stays lit until you click it again. That's the only way to close it, so it has to read as pressed rather than merely hovered.
 
-The `⋯` button on a row, or right-click, holds the category list, then **Rename in VS Code…**, **Archive** and **Delete…** under a separator. Everything else on a row is its own button, revealed on hover: a pencil and a refresh on the title, a pencil and two generate buttons on the subtitle. They collapse to zero width when you're not hovering, because holding their place cost every title about 60px for absolutely nothing.
+The `⋯` button on a row, or right-click, holds the category list, then **Rename in VS Code…**, **Archive** and **Delete…** under a separator. The button opens its menu underneath itself; a right-click opens it under the pointer, where you clicked, and flips it above the pointer when the row you used is near the bottom of the pane. Everything else on a row is its own button, revealed on hover: a pencil and a refresh on the title, a pencil and two generate buttons on the subtitle. They collapse to zero width when you're not hovering, because holding their place cost every title about 60px for absolutely nothing.
 
 Titles and subtitles get edited through their pencils, or by double-clicking the title. Neither is a click target — the whole row opens the session, and an edit affordance covering half the row turned that into a coin flip. Clearing the title field restores the session's own.
 
@@ -299,6 +327,7 @@ Titles and subtitles get edited through their pencils, or by double-clicking the
 | Sort by | `chatTags.sortBy` |
 | Group by category | `chatTags.groupBy` |
 | Show archived | `chatTags.showArchived` |
+| Show model and context | `chatTags.showModel` |
 
 Every one is a real VS Code setting, so the pane and the Settings UI are two windows onto one stored value rather than two stores having an argument about it. Edit either.
 

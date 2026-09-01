@@ -225,6 +225,11 @@
 					"type": "boolean",
 					"default": false,
 					"description": "Show archived sessions, in their own section at the bottom of the list."
+				},
+				"chatTags.showModel": {
+					"type": "boolean",
+					"default": false,
+					"description": "Show the model each chat is set to, and how full its context window is. The percentage comes from the chat's own record of its last prompt — chats whose provider does not report one show the model alone."
 				}
 			}
 		}
@@ -238,6 +243,7 @@
 		"probe:fork-header": "node scripts/probe-fork-header.mjs",
 		"probe:turn": "node scripts/probe-turn.mjs",
 		"probe:order": "node scripts/probe-order.mjs",
+		"probe:model": "node scripts/probe-model.mjs",
 		"package": "npm run clean && tsc -p ./ && vsce package",
 		"clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\""
 	},

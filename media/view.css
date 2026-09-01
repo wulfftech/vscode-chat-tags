@@ -120,7 +120,7 @@ button {
 	font-weight: 600;
 }
 
-.row.selected {
+.row.active {
 	background: var(--vscode-list-activeSelectionBackground);
 	color: var(--vscode-list-activeSelectionForeground);
 }
@@ -253,6 +253,80 @@ button {
 	white-space: nowrap;
 	font-size: 11px;
 	color: var(--vscode-descriptionForeground);
+}
+
+/* the model a chat is set to, and how full its window is. it takes the end of the
+   subtitle line, and the two of them are in a fight for a sidebar's worth of width.
+   the chip wins it: shrink 0 against the subtitle's 1, so the subtitle gives ground
+   first. letting them shrink together looked right and wasn't — at 340px the name was
+   ellipsized away to nothing and the chip drew a bar with no idea what it measured */
+.usage {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	/* the ceiling on that win. below about 200px there is no arrangement that fits both,
+	   and half a subtitle beats a whole model name */
+	max-width: 55%;
+	min-width: 0;
+	font-size: 10px;
+	line-height: 1;
+	color: var(--vscode-descriptionForeground);
+}
+
+/* the only part of the chip that gives — the meter and the number below are both
+   flex: 0 0 auto, so what gets cut is always the name and never the reading */
+.usage .model-name {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 10em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* a bar answers 'how full' before a number does, which is the only question this is
+   here to answer at a glance. the number stays for the times it isn't */
+.usage .meter {
+	flex: 0 0 auto;
+	width: 22px;
+	height: 3px;
+	border-radius: 2px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--vscode-descriptionForeground) 30%, transparent);
+}
+
+.usage .fill {
+	display: block;
+	height: 100%;
+	background: currentColor;
+}
+
+/* tabular figures so the percentage does not jitter sideways as it climbs — this is the
+   one number in the view that changes while you are looking at it */
+.usage .share {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+/* the editor's own warning colour, then the red the delete action already owns. a context
+   about to start dropping its own history is the one reading here worth alarming about.
+
+   deliberately not inputValidation.warningForeground, which is what the elevated pill
+   asks for: that token is null in all four stock themes, so as a text colour it resolves
+   to plain foreground and the 'high' state would have been invisible. the pill gets away
+   with it because its amber comes from warningBackground and warningBorder instead */
+.usage[data-level="high"] {
+	color: var(--vscode-editorWarning-foreground, var(--vscode-foreground));
+}
+
+.usage[data-level="full"] {
+	color: var(--vscode-errorForeground, var(--vscode-foreground));
+}
+
+/* an archived row is put away, like its pills */
+.row.archived .usage {
+	opacity: 0.5;
 }
 
 /* the subtitle text is no longer a click target — editing needs the pencil, so
@@ -519,6 +593,93 @@ button {
 	flex: 1 1 auto;
 	min-width: 0;
 	accent-color: var(--vscode-focusBorder);
+}
+
+/* ── selecting a set of chats ────────────────────────────────────────────── */
+
+/* an overlay again, for the same reason the drop tint is one: the row underneath is
+   already carrying a category wash, a hover or the opened-row background, and a ticked
+   row has to read the same over all of them. ::before here, ::after is the drop target's
+   —
+   the theme's own selection colour, mixed rather than laid on flat. list.inactiveSelection-
+   Background is opaque in every stock theme, so using it as written would paint the
+   category wash out of the row entirely */
+.row[data-selected="true"]::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: color-mix(in srgb,
+		var(--vscode-list-activeSelectionBackground, var(--vscode-focusBorder)) 55%, transparent);
+}
+
+/* and the dot goes square. shape rather than size, so the title beside it does not shift
+   sideways as rows go in and out of the set — a tint alone is too easy to lose against a
+   row that is already washed with its category colour */
+.row[data-selected="true"] .dot {
+	border-radius: 2px;
+	background: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+	box-shadow: none;
+	animation: none;
+	opacity: 1;
+}
+
+/* the bar stands where the toolbar stands rather than under it, so it inherits the
+   sticky slot and cannot be scrolled away from */
+.toolbar.selecting {
+	background: color-mix(in srgb, var(--vscode-focusBorder) 14%, var(--vscode-sideBar-background, transparent));
+	border-bottom-color: var(--vscode-focusBorder);
+}
+
+.toolbar.selecting .count {
+	color: var(--vscode-foreground);
+	font-weight: 600;
+}
+
+.toolbar.selecting .bulk {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	opacity: 1;
+}
+
+.toolbar.selecting .bulk:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* the group's tick keeps out of the way until there is a reason for it: hovering the
+   heading, or a selection already under way somewhere in the list */
+.group .pick {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	padding: 0 1px;
+	margin-left: 2px;
+	opacity: 0;
+	color: var(--vscode-descriptionForeground);
+}
+
+.group:hover .pick,
+.group:focus-within .pick,
+.group .pick[data-coverage="some"],
+.group .pick[data-coverage="all"] {
+	opacity: 0.75;
+}
+
+.group .pick[data-coverage="some"],
+.group .pick[data-coverage="all"] {
+	color: var(--vscode-focusBorder);
+}
+
+.group .pick:hover,
+.group .pick:focus-visible {
+	opacity: 1;
+	color: var(--vscode-foreground);
+}
+
+.group .pick:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+	border-radius: 2px;
 }
 
 /* ── dragging a chat into another group ──────────────────────────────────── */

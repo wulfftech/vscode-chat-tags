@@ -206,6 +206,51 @@ export class TagStore {
 		await this.patchMeta(sessionId, { archivedAt: archived ? Date.now() : undefined });
 	}
 
+	// archiving a hundred chats one at a time would be a hundred memento writes and a
+	// hundred repaints. these take the set, write once and fire once
+	//
+	// an already-archived chat keeps the date it already had, the same rule the seed
+	// follows — a bulk pass over a list that happens to include it must not restamp it
+	async setArchivedMany(sessionIds: string[], archived: boolean): Promise<number> {
+		const meta = { ...this.allMeta };
+		const now = Date.now();
+		let changed = 0;
+		for (const sessionId of sessionIds) {
+			const entry = meta[sessionId] ?? {};
+			const next = archived ? (entry.archivedAt ?? now) : undefined;
+			if (entry.archivedAt === next) {
+				continue;
+			}
+			meta[sessionId] = { ...entry, archivedAt: next };
+			changed++;
+		}
+		if (!changed) {
+			return 0;
+		}
+		await this.memento.update(SESSION_META_KEY, meta);
+		this._onDidChange.fire();
+		return changed;
+	}
+
+	async setCategoryMany(sessionIds: string[], categoryId: string | undefined): Promise<number> {
+		const meta = { ...this.allMeta };
+		let changed = 0;
+		for (const sessionId of sessionIds) {
+			const entry = meta[sessionId] ?? {};
+			if (entry.categoryId === categoryId) {
+				continue;
+			}
+			meta[sessionId] = { ...entry, categoryId };
+			changed++;
+		}
+		if (!changed) {
+			return 0;
+		}
+		await this.memento.update(SESSION_META_KEY, meta);
+		this._onDidChange.fire();
+		return changed;
+	}
+
 	// one-way seed from vs code's own archive. a session is only ever taken once, so
 	// unarchiving here sticks and one archived over there later still arrives
 	async seedArchived(sessionIds: string[]): Promise<number> {

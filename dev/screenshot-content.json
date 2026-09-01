@@ -361,7 +361,7 @@
       "createdDaysAgo": 110
     },
     {
-      "_shows": "sort pane: sorts by Created, so ages and row order deliberately disagree.",
+      "_shows": "sort pane: sorts by Created, so ages and row order deliberately disagree. context nearly full — the bar fills and the chip takes the error colour.",
       "id": "o1",
       "title": "Quarterly All-Hands Announcement",
       "subtitle": "Good news, everyone!",
@@ -371,10 +371,13 @@
       "activity": "active",
       "unread": true,
       "ageMinutes": 0.5,
-      "createdDaysAgo": 40
+      "createdDaysAgo": 40,
+      "model": "Claude Opus 5",
+      "contextWindow": 200000,
+      "promptTokens": 191400
     },
     {
-      "_shows": "sort pane: newest by creation date, so it rises to the top under Created.",
+      "_shows": "sort pane: newest by creation date, so it rises to the top under Created. context getting high — the chip takes the same amber as the elevated permission pill.",
       "id": "o2",
       "title": "Stakeholder Sentiment Analysis",
       "subtitle": "It's the vibe of the thing",
@@ -383,10 +386,13 @@
       "requestCount": 12,
       "activity": "recent",
       "ageMinutes": 8,
-      "createdDaysAgo": 0.2
+      "createdDaysAgo": 0.2,
+      "model": "Claude Sonnet 5",
+      "contextWindow": 200000,
+      "promptTokens": 158200
     },
     {
-      "_shows": "sort pane.",
+      "_shows": "sort pane. plenty of room left.",
       "id": "o3",
       "title": "Root Cause Analysis Findings",
       "subtitle": "Denial and error",
@@ -395,10 +401,13 @@
       "requestCount": 4,
       "activity": "recent",
       "ageMinutes": 60,
-      "createdDaysAgo": 12
+      "createdDaysAgo": 12,
+      "model": "Claude Haiku 4.5",
+      "contextWindow": 128000,
+      "promptTokens": 24500
     },
     {
-      "_shows": "sort pane: uncategorised.",
+      "_shows": "sort pane: uncategorised. a chat whose provider never wrote a prompt size — the chip shows the model alone rather than inventing a number.",
       "id": "o4",
       "title": "Asset Relocation Final Approval",
       "subtitle": "Straight to the pool room",
@@ -406,10 +415,12 @@
       "requestCount": 3,
       "activity": "idle",
       "ageMinutes": 240,
-      "createdDaysAgo": 2
+      "createdDaysAgo": 2,
+      "model": "Auto",
+      "contextWindow": 128000
     },
     {
-      "_shows": "sort pane.",
+      "_shows": "sort pane. barely started.",
       "id": "o5",
       "title": "Debate Resolution Summary",
       "subtitle": "It's a mute point",
@@ -418,10 +429,13 @@
       "requestCount": 7,
       "activity": "idle",
       "ageMinutes": 1000,
-      "createdDaysAgo": 75
+      "createdDaysAgo": 75,
+      "model": "Auto",
+      "contextWindow": 200000,
+      "promptTokens": 9800
     },
     {
-      "_shows": "sort pane.",
+      "_shows": "sort pane. about half a window used.",
       "id": "o6",
       "title": "Personal Grooming Policy Update",
       "subtitle": "Get a fuckin' haircut",
@@ -430,10 +444,13 @@
       "requestCount": 2,
       "activity": "idle",
       "ageMinutes": 2200,
-      "createdDaysAgo": 9
+      "createdDaysAgo": 9,
+      "model": "Claude Sonnet 5",
+      "contextWindow": 200000,
+      "promptTokens": 104600
     },
     {
-      "_shows": "sort pane: uncategorised tail.",
+      "_shows": "sort pane: uncategorised tail. no model named in the file, so no chip at all — an unreadable header does this, and so does a chat that has never been sent.",
       "id": "o7",
       "title": "Dairy Consumption Objectives",
       "subtitle": "Here to drink milk and kick arse",
@@ -673,7 +690,7 @@
       "category": "c2"
     },
     {
-      "_shows": "sort pane: fills the last row of the pane.",
+      "_shows": "sort pane: fills the last row of the pane. about half a window used, on a smaller model.",
       "id": "o8",
       "title": "Nutritional Guidelines Update",
       "subtitle": "You don't win friends with salad",
@@ -682,7 +699,10 @@
       "requestCount": 5,
       "activity": "idle",
       "ageMinutes": 6000,
-      "createdDaysAgo": 98
+      "createdDaysAgo": 98,
+      "model": "Claude Haiku 4.5",
+      "contextWindow": 128000,
+      "promptTokens": 61300
     }
   ]
 }

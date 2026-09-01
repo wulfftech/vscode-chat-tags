@@ -55,6 +55,12 @@ interface RenderedSession {
 	// command it ran. the picker level says nothing about this one — under a policy that
 	// blocks the elevated levels it is the only route left
 	autoApproving?: boolean;
+	// what the model picker is set to, what that model's context window holds, and how
+	// much of it the newest prompt used. all three are independently absent: a chat can
+	// name a model with no window size, or a window size with nothing measured against it
+	model?: string;
+	contextWindow?: number;
+	promptTokens?: number;
 }
 
 function nonce(): string {
@@ -303,7 +309,12 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				permissionLevel: isDefaultPermission(session.permissionLevel)
 					? undefined
 					: session.permissionLevel,
-				autoApproving: this.liveState.isApproving(session.sessionId) || undefined
+				autoApproving: this.liveState.isApproving(session.sessionId) || undefined,
+				model: session.model?.name,
+				contextWindow: session.model?.maxInputTokens,
+				// the tracker first: it reads the end of the file and keeps reading as the
+				// chat runs, so its number is the newer one whenever it has one at all
+				promptTokens: this.liveState.promptTokens(session.sessionId) ?? session.promptTokens
 			};
 		});
 
@@ -329,7 +340,8 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				subtitleModel: subtitles.model,
 				sortBy: list.sortBy,
 				groupBy: list.groupBy,
-				showArchived: list.showArchived
+				showArchived: list.showArchived,
+				showModel: list.showModel
 			},
 			models: this.subtitles.availableModels
 		});
@@ -465,6 +477,21 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 				return;
 			case 'setArchived':
 				await this.tags.setArchived(message.sessionId, Boolean(message.archived));
+				return;
+			case 'setArchivedMany': {
+				const ids = Array.isArray(message.sessionIds) ? message.sessionIds : [];
+				const changed = await this.tags.setArchivedMany(ids, Boolean(message.archived));
+				// a bulk action moves rows out from under the pointer, so it says what it did
+				this.log.appendLine(
+					`[bulk] ${message.archived ? 'archived' : 'restored'} ${changed} of ${ids.length} selected`
+				);
+				return;
+			}
+			case 'setCategoryMany':
+				await this.tags.setCategoryMany(
+					Array.isArray(message.sessionIds) ? message.sessionIds : [],
+					message.categoryId ?? undefined
+				);
 				return;
 			case 'deleteSession':
 				await this.delete(message.sessionId);
