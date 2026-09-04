@@ -26,6 +26,10 @@
 	let draggingCategoryId = null;
 	// and the chat being dragged from one group into another, held for the same reason
 	let draggingSessionId = null;
+	// the id of a category created via "+ Add category" but not yet rendered — the next
+	// render focuses and selects its name input so typing replaces the "New category"
+	// placeholder instead of requiring it to be cleared by hand first
+	let focusNewCategoryId = null;
 
 	// inline svg rather than text glyphs — a glyph renders at whatever weight the user's
 	// font decides, and ⚙ in particular lands as an emoji on some systems
@@ -1521,6 +1525,12 @@
 			const panel = buildCategoriesPanel();
 			root.appendChild(panel);
 			restoreGripFocus(panel, focusedGripId);
+			if (focusNewCategoryId) {
+				const newRow = panel.querySelector('.cat-row[data-category-id="' + focusNewCategoryId + '"]');
+				const newInput = newRow && newRow.querySelector('input[type="text"]');
+				if (newInput) { newInput.focus(); newInput.select(); }
+				focusNewCategoryId = null;
+			}
 		} else if (openPanel === 'settings') {
 			root.appendChild(buildSettingsPanel());
 		}
@@ -1618,6 +1628,13 @@
 			// after a new chat lands shows up without the user clicking it
 			if (message.activeSessionId !== undefined) {
 				activeId = message.activeSessionId;
+			}
+			// "+ Add category" always lands with the same placeholder text, so the one new id
+			// in this batch is what the next render should focus and select
+			if (openPanel === 'categories' && message.categories) {
+				const previousIds = new Set(state.categories.map(category => category.id));
+				const added = message.categories.filter(category => !previousIds.has(category.id));
+				if (added.length === 1) { focusNewCategoryId = added[0].id; }
 			}
 			state = {
 				sessions: message.sessions,
