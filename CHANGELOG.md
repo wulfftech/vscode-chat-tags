@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.1
+
+- **+** opens one chat now, not two. `newLocalChat` started landing its tab straight in the editor as of VS Code 1.135.0, so the move that used to be needed after it was quietly starting a second, unrelated chat instead — and sometimes leaving neither one focused. The move only runs now if nothing has landed yet.
+- Clicking a chat that's already open focuses it instead of reopening it. **Split to the side** and **Dedicated right column** used to rearrange the layout on every click regardless of where the chat already was, which could drag it straight back out of a pane you'd put it in by hand.
+- A new category's name starts selected, so typing over "New category" replaces it instead of requiring it to be cleared by hand first.
+
 ## 0.17.0
 
 - **Show model and context**, in the sort menu, puts the model each chat is set to at the end of its row, with a bar and a percentage for how full that model's context window is. Both come out of the chat's own file: the picker's value, and the size of the last prompt it sent. It goes amber past three-quarters and red past nine-tenths, which is where a long chat starts quietly dropping its own early history. Off by default.
