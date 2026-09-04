@@ -7,7 +7,7 @@ import { readArchivedSessionIds, stateDbBeside } from '../core/archiveSeed';
 import { ChatSessionInfo, activityStateOf, compareSessions, listSessions } from '../core/sessions';
 import { PALETTE, TagStore } from '../model/categories';
 import { OpenTarget, prepareForOpen, readActivityThresholds, readListPreferences, readPreferences, readSubtitlePreferences, writeSetting, writeTarget } from '../layout';
-import { deleteSession, newSession, openSession, renameSession } from '../navigation';
+import { deleteSession, focusOpenTab, newSession, openSession, renameSession } from '../navigation';
 import { isDefaultPermission } from '../core/permissions';
 import { OpenTurn, SessionLiveTracker } from '../core/sessionLive';
 import { GenerationMode } from '../core/subtitleText';
@@ -605,6 +605,18 @@ export class SessionsViewProvider implements vscode.WebviewViewProvider {
 		// opening is what clears the attention state — that's the whole contract of the
 		// left border, so mark first and let the result post the repaint
 		await this.tags.markSeen(sessionId);
+
+		// already open somewhere just needs focus. arranging a layout and reopening on top
+		// of that would fight whatever the user already has it sitting in — 'beside' and
+		// 'dedicatedRight' in particular chase a fixed position on every click regardless of
+		// where the tab actually is, which is exactly what drags a session back out of a
+		// pane the user put it in by hand
+		const session = this.sessions.find(entry => entry.sessionId === sessionId);
+		const label = session ? (this.tags.meta(sessionId).title ?? session.title) : undefined;
+		if (label && await focusOpenTab(label)) {
+			this.log.appendLine(`[open] ${sessionId} focused an existing tab`);
+			return;
+		}
 
 		// arrange the window first — the open path targets whichever group is active
 		await prepareForOpen(readPreferences());

@@ -99,6 +99,28 @@ const NEW_LOCAL_CHAT = 'workbench.action.chat.newLocalChat';
 const OPEN_IN_EDITOR = 'workbench.action.chat.openInEditor';
 const NEW_CHAT = 'workbench.action.chat.newChat';
 
+function delay(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function tabCount(): number {
+	return vscode.window.tabGroups.all.reduce((total, group) => total + group.tabs.length, 0);
+}
+
+// opening an editor is async even once the command resolves — see spike.ts, which waits a
+// flat 1200ms before judging a rung. this polls instead, so the common case doesn't pay
+// that latency on every single new chat
+async function waitForNewTab(before: number, timeoutMs: number): Promise<boolean> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		if (tabCount() > before) {
+			return true;
+		}
+		await delay(50);
+	}
+	return false;
+}
+
 export type NewSessionRung = 'local-in-editor' | 'new-chat';
 
 export interface NewSessionResult {
@@ -122,7 +144,17 @@ export const NEW_SESSION_LADDER: NewSessionRungSpec[] = [
 		commands: [NEW_LOCAL_CHAT, OPEN_IN_EDITOR],
 		landsTab: true,
 		run: async () => {
+			const before = tabCount();
 			await vscode.commands.executeCommand(NEW_LOCAL_CHAT);
+			// confirmed working on 1.134.0, this rung's whole reason to exist: newLocalChat
+			// opened the session into the chat *view*, leaving nothing in the editor area for
+			// openInEditor to move across. on 1.135.0 newLocalChat already lands a tab itself —
+			// openInEditor still resolves without throwing, but with nothing left to move it
+			// starts a second, unrelated chat instead. a tab count that already grew is that
+			// case, and the move below must be skipped rather than run on top of it
+			if (await waitForNewTab(before, 1500)) {
+				return;
+			}
 			// the session exists the moment that resolves. a move that fails leaves a real
 			// chat in the view, so falling through to the next rung would only make a second one
 			try {
@@ -200,4 +232,39 @@ export async function renameSession(sessionId: string, label: string): Promise<v
 		resource: vscode.Uri.parse(localSessionUriString(sessionId)),
 		label
 	});
+}
+
+// group-position focus commands, in vscode.window.tabGroups.all order. there is no
+// command that takes an arbitrary group index — just these five plus a catch-all for
+// whatever's last, which is what every group past the fifth falls back to
+const FOCUS_GROUP_COMMANDS = [
+	'workbench.action.focusFirstEditorGroup',
+	'workbench.action.focusSecondEditorGroup',
+	'workbench.action.focusThirdEditorGroup',
+	'workbench.action.focusFourthEditorGroup',
+	'workbench.action.focusFifthEditorGroup'
+];
+
+// a chat editor's tab carries no resource — TabInputKind.Unknown, see sessionsView.ts —
+// so there is no URI to search tabGroups for for the way an ordinary file's editor would
+// be found. label is the only thing on a Tab that says which session it is, so it is the
+// only thing this can match against. two sessions sharing a title (both default-named
+// "New Chat", say) is the one way this focuses the wrong one — the same class of
+// best-effort failure every rung on the ladders above already accepts
+export async function focusOpenTab(label: string): Promise<boolean> {
+	const groups = vscode.window.tabGroups.all;
+	for (let index = 0; index < groups.length; index++) {
+		const tabIndex = groups[index].tabs.findIndex(tab => tab.label === label);
+		if (tabIndex === -1) {
+			continue;
+		}
+		await vscode.commands.executeCommand(FOCUS_GROUP_COMMANDS[index] ?? 'workbench.action.focusLastEditorGroup');
+		// the group is active now, but not necessarily this tab within it. VS Code only
+		// numbers a group's own tabs 1 through 9 this way — nothing reaches past that
+		if (tabIndex < 9) {
+			await vscode.commands.executeCommand(`workbench.action.openEditorAtIndex${tabIndex + 1}`);
+		}
+		return true;
+	}
+	return false;
 }
